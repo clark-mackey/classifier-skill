@@ -1,0 +1,6 @@
+interface:
+  display_name: "Classifier (Jev)"
+  short_description: "Typed choice, yes/no, and score decisions"
+  default_prompt: "Use $classifier-skill to classify this with a typed Jev decision."
+policy:
+  allow_implicit_invocation: true

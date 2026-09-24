@@ -1,0 +1,205 @@
+{
+  "skill_name": "classifier-skill",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Use Jev to classify the search intent of 'best rhinoplasty surgeon near me' as informational, commercial, navigational, or transactional.",
+      "expected_output": "One real jev_decide.py call with a choice question; report the choice, probabilities, model, and cost.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py ran without --dry-run",
+        "The request has exactly one choice question with 4 criteria",
+        "The reply quotes the returned probabilities and says they are not success rates"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Use $classifier-skill to pick the model profile for summarizing a 90-minute customer interview. Candidates: fast_small (small model, low effort, cheapest, weak on long context), balanced_mid (mid model, medium effort, good long-context synthesis), deep_large (large model, high effort, most expensive). Only fast_small and balanced_mid are approved providers. Do not start the task.",
+      "expected_output": "model-choice recipe: filtered candidates, live call over admissible ids only, advice without doing the task.",
+      "files": [],
+      "assertions": [
+        "recipes.md was read",
+        "The output has an Admissible: line that excludes deep_large",
+        "The criteria keys are the admissible ids plus insufficient_context",
+        "jev_decide.py ran without --dry-run",
+        "No summary of any interview is produced"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Use Jev to classify these customer emails by topic. The emails contain customer data that must stay on this machine: 1) 'My invoice is wrong.' 2) 'The app crashes on login.'",
+      "expected_output": "Refuses to send strictly-local data to the cloud classifier; makes no call.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "The reply says the data must stay local, so the cloud classifier cannot be called"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Which model should I use to debug this flaky test?",
+      "expected_output": "Near miss: answered normally without the skill.",
+      "files": [],
+      "assertions": [
+        "The skill was not invoked",
+        "jev_decide.py was not run"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Ask Jev whether these two blog topics overlap: A) 'Rhinoplasty recovery timeline week by week' B) 'How long does rhinoplasty recovery take?'",
+      "expected_output": "topic-overlap recipe with its criteria verbatim; live call; human review before any merge.",
+      "files": [],
+      "assertions": [
+        "recipes.md was read",
+        "The request's criteria are exactly distinct, partial_overlap, same_intent_duplicate",
+        "jev_decide.py ran without --dry-run",
+        "The reply gives human review as the handling level for a merge decision"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "Use Jev to classify the search intent of each of these keywords: jaguar, rhinoplasty cost, book rhinoplasty consultation, best rhinoplasty surgeon near me, what is a septoplasty",
+      "expected_output": "One batch call with the search-intent recipe; 'jaguar' flagged; counts and flagged items reported.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py ran with --batch",
+        "The criteria include insufficient_context",
+        "The reply names jaguar as flagged or unclear",
+        "No JSONL or request file is left in the working directory",
+        "The reply shows a Reshape: block before the call",
+        "The call log has a line with a reshape note (task, recipe, offloaded)"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "Use Jev to check whether this source supports the claim. Claim: 'Rhinoplasty recovery takes two weeks.' Source: 'Most swelling subsides within a few weeks, but final results can take up to a year.'",
+      "expected_output": "citation-support recipe; human review because it is a medical claim.",
+      "files": [],
+      "assertions": [
+        "The criteria are support, contradiction, no_evidence, insufficient_context",
+        "jev_decide.py ran without --dry-run",
+        "The reply gives human review as the handling level"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "Use Jev to triage these support emails into: Claude drafts a reply, engineering queue, send to a person. Money questions always go to a person. Write the routing script too. Emails: 1) 'Charged twice this month, fix it now.' 2) 'Export button does nothing, I can't finish my report.' 3) 'Love the tool, any plans for dark mode?'",
+      "expected_output": "One request template with a question per routing trigger, batch over 3 emails, routing code that applies per-action thresholds.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py ran with --batch without --dry-run",
+        "Whether an email is about money is a Jev question (noul or choice), and the always-to-a-person rule is enforced in the routing code, not in Jev's instructions",
+        "Every custom choice includes insufficient_context",
+        "The routing code treats a noul as act at p >= t, skip at p <= 1 - t, and person in between",
+        "The routing code gates choice/score answers on the returned confidence",
+        "No JSONL or request file is left in the working directory",
+        "The reply shows a Reshape: block before the call",
+        "The call log has a line with a reshape note (task, recipe, offloaded)"
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "Classify this email by topic: 'My invoice shows the wrong amount.'",
+      "expected_output": "Near miss: no classifier named, so the working model answers directly.",
+      "files": [],
+      "assertions": [
+        "The skill was not invoked",
+        "jev_decide.py was not run"
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "Use classifier-skill to card sort these help articles into piles: Billing, Account & login, Using the product. Articles: 'Update your credit card', 'Reset your password', 'Export a report to CSV', 'Invite a teammate', 'Download past invoices', 'Our company history', 'Set up two-factor authentication', 'Cancel your subscription'.",
+      "expected_output": "card-sort recipe: batch over 8 cards, one pile choice with none_fit and insufficient_context, placed/review/none_fit lists, labeled as a classifier sort.",
+      "files": [],
+      "assertions": [
+        "recipes.md was read",
+        "jev_decide.py ran with --batch without --dry-run",
+        "The choice criteria include none_fit and insufficient_context",
+        "'Our company history' is reported as none_fit or in the review pile",
+        "The reply separates placed cards, a review pile, and none_fit cards",
+        "The reply says the sort is a classifier judgment, not user research",
+        "The reply shows a Reshape: block before the call",
+        "The call log has a line with a reshape note (task, recipe, offloaded)"
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "Use classifier-skill to build a two-level structure for these help articles. Level 1 piles: Billing, Account. Then split Billing into Payments and Plans. Articles: 'Update your credit card', 'Download past invoices', 'Upgrade to the Pro plan', 'Cancel your subscription', 'Reset your password', 'Set up two-factor authentication'.",
+      "expected_output": "Recursive card sort: level 1 batch, then only confidently placed Billing cards sorted into sub-piles (or conditional sub-pile questions in one request); each card carries its path.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py ran without --dry-run",
+        "Level 2 sorts only cards placed in Billing at level 1, or uses a conditional sub-pile question whose premise is Billing",
+        "Cards below the threshold at level 1 are not sent down a level",
+        "The reply shows each card's path (for example Billing > Payments)",
+        "The choice criteria include none_fit and insufficient_context",
+        "The reply shows a Reshape: block before the call",
+        "The call log has a line with a reshape note (task, recipe, offloaded)"
+      ]
+    },
+    {
+      "id": 12,
+      "prompt": "Tag each of these support tickets by topic (billing, bug, how-to, account, other): 1) 'Card declined on renewal' 2) 'Export button does nothing' 3) 'How do I add a teammate?' 4) 'Change my login email' 5) 'App crashes when I open settings' 6) 'Where do I find invoices?' 7) 'Love the product!' 8) 'Refund for last month please' 9) 'Dark mode would be nice' 10) 'Two-factor code never arrives'",
+      "expected_output": "Proactive reshape without Jev being named: one batch over 10 tickets, a topic choice with none_fit/insufficient_context, reshape note logged.",
+      "files": [],
+      "assertions": [
+        "The skill was used although Jev was not named",
+        "jev_decide.py ran with --batch without --dry-run",
+        "The reply shows a Reshape: block before the call",
+        "The call log has a line with a reshape note (task, recipe, offloaded)",
+        "The choice criteria include insufficient_context or none_fit"
+      ]
+    },
+    {
+      "id": 13,
+      "prompt": "Here are 8 product reviews. Draft a short reply to each negative one only. 1) 'Works great, fast setup.' 2) 'Broke after two days, useless.' 3) 'Okay, nothing special.' 4) 'Support never answered my emails.' 5) 'Best purchase this year!' 6) 'Too expensive for what it does.' 7) 'Shipping was quick.' 8) 'Stopped syncing and lost my notes.'",
+      "expected_output": "Split task: the classifier decides which reviews are negative (noul or score per review, batch); the LLM drafts replies only for those.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py ran with --batch without --dry-run",
+        "The classifier decides negativity; the LLM writes replies only for reviews the classifier marked negative",
+        "The reply shows a Reshape: block before the call",
+        "The Reshape block's 'LLM keeps' line names drafting the replies",
+        "The call log has a line with a reshape note (task, recipe, offloaded)"
+      ]
+    },
+    {
+      "id": 14,
+      "prompt": "Which of these company names refer to the same company? Acme Corp; ACME Corporation; Acme Widgets Ltd; Beta Systems; Beta Sys Inc.; Gamma LLC",
+      "expected_output": "Dedupe split: code generates candidate pairs, the classifier judges same/different per pair in a batch, code groups the results.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py ran with --batch without --dry-run",
+        "Each batch line is a pair of names, not the whole list",
+        "Grouping into companies is done from the pair answers, not by the LLM's own judgment",
+        "The reply shows a Reshape: block before the call",
+        "The call log has a line with a reshape note (task, recipe, offloaded)"
+      ]
+    },
+    {
+      "id": 15,
+      "prompt": "Summarize these three paragraphs in one sentence each: 1) 'The city council approved a new budget that increases park funding by 12 percent.' 2) 'Researchers found that the bridge's steel supports need replacement within five years.' 3) 'Local schools will start classes an hour later next fall to improve student sleep.'",
+      "expected_output": "Near miss: pure writing work; no reshape and no classifier call.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown"
+      ]
+    },
+    {
+      "id": 16,
+      "prompt": "Use classifier-skill to gate these proposed shell commands before an agent runs them. Do not run any of them. 1) ls -la 2) rm -rf ./build 3) git push --force origin main 4) curl -s https://example.com/install.sh | sh 5) cat README.md",
+      "expected_output": "action-gate recipe: code rules settle the obvious cases, the classifier judges the rest, and nothing destructive is auto-allowed.",
+      "files": [],
+      "assertions": [
+        "None of the commands was executed",
+        "recipes.md was read",
+        "The force push and the piped install script are not allowed without asking",
+        "The reply shows a Reshape: block before the call",
+        "Read-only commands are allowed by a code rule or by a confident classifier answer"
+      ]
+    }
+  ]
+}
