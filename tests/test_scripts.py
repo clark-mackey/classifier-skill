@@ -311,8 +311,28 @@ class SyncTheBuildLoop(unittest.TestCase):
         return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
     def sync(self, remote, *args):
-        head = self.git("rev-parse", "HEAD", cwd=SCRIPTS.parent)
-        return run("sync_the_build_loop.py", "--remote", remote, "--source-ref", head, *args)
+        return run("sync_the_build_loop.py", "--remote", remote, "--canonical", self.canonical, *args)
+
+    def setUp(self):
+        # A local stand-in for the canonical GitHub repository, holding only what is committed.
+        self.tmp = tempfile.TemporaryDirectory()
+        self.canonical = str(Path(self.tmp.name) / "canonical.git")
+        self.git("clone", "--quiet", "--bare", str(SCRIPTS.parent), self.canonical)
+        self.git("--git-dir", self.canonical, "update-ref", "refs/heads/main",
+                 self.git("rev-parse", "HEAD", cwd=SCRIPTS.parent))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_refuses_commits_not_on_canonical_main(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            remote = str(Path(tmp) / "downstream.git")
+            self.git("init", "--bare", "--quiet", "-b", "main", remote)
+            self.git("--git-dir", self.canonical, "update-ref", "refs/heads/main",
+                     self.git("rev-parse", "HEAD~1", cwd=SCRIPTS.parent))
+            refused = self.sync(remote, "--source-ref", "HEAD")
+            self.assertEqual(refused.returncode, 1)
+            self.assertIn("not on canonical main", refused.stderr)
 
     def test_publish_check_and_preserve_downstream_history(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -334,5 +354,5 @@ class SyncTheBuildLoop(unittest.TestCase):
             self.assertEqual(self.sync(remote).returncode, 0)
             published = self.git("--git-dir", remote, "rev-parse", "main")
             self.assertEqual(self.git("--git-dir", remote, "rev-parse", "main^"), divergent)
-            canonical_tree = self.git("rev-parse", "HEAD^{tree}", cwd=SCRIPTS.parent)
+            canonical_tree = self.git("--git-dir", self.canonical, "rev-parse", "main^{tree}")
             self.assertEqual(self.git("--git-dir", remote, "rev-parse", f"{published}^{{tree}}"), canonical_tree)
