@@ -302,3 +302,37 @@ class CallLog(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SyncTheBuildLoop(unittest.TestCase):
+    """Publishes to a throwaway bare repository, never the real downstream."""
+
+    def git(self, *args, cwd=None):
+        return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+    def sync(self, remote, *args):
+        head = self.git("rev-parse", "HEAD", cwd=SCRIPTS.parent)
+        return run("sync_the_build_loop.py", "--remote", remote, "--source-ref", head, *args)
+
+    def test_publish_check_and_preserve_downstream_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            remote = str(Path(tmp) / "downstream.git")
+            self.git("init", "--bare", "--quiet", "-b", "main", remote)
+            self.assertEqual(self.sync(remote, "--check").returncode, 1)
+            self.assertEqual(self.sync(remote).returncode, 0)
+            self.assertEqual(self.sync(remote, "--check").returncode, 0)
+
+            clone = str(Path(tmp) / "clone")
+            self.git("clone", "--quiet", remote, clone)
+            (Path(clone) / "DOWNSTREAM.md").write_text("downstream-only\n")
+            self.git("add", "DOWNSTREAM.md", cwd=clone)
+            self.git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "--quiet", "-m", "x", cwd=clone)
+            self.git("push", "--quiet", "origin", "main", cwd=clone)
+            divergent = self.git("rev-parse", "HEAD", cwd=clone)
+
+            self.assertEqual(self.sync(remote, "--check").returncode, 1)
+            self.assertEqual(self.sync(remote).returncode, 0)
+            published = self.git("--git-dir", remote, "rev-parse", "main")
+            self.assertEqual(self.git("--git-dir", remote, "rev-parse", "main^"), divergent)
+            canonical_tree = self.git("rev-parse", "HEAD^{tree}", cwd=SCRIPTS.parent)
+            self.assertEqual(self.git("--git-dir", remote, "rev-parse", f"{published}^{{tree}}"), canonical_tree)

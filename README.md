@@ -66,4 +66,8 @@ Start your agent fresh from that environment so it discovers the skill and recei
 
 The OpenRouter Decisions endpoint is alpha; TypeSafe's System One API is the direct route with the same request shape. Returned probabilities describe the classifier's preference among the supplied options. They are not success rates. Data you say must stay on your machine is never sent.
 
+## Distribution
+
+This repository is the canonical source. `The-Build-Loop/classifier-skill` is a generated mirror, not a second authoring source; do not edit it directly. After committing here, run `python3 scripts/sync_the_build_loop.py` to publish the committed tree, or add `--check` to report drift without pushing. The publisher keeps any downstream history and adds a commit carrying the canonical tree on top of it.
+
 - [MIT License](LICENSE)
