@@ -4,6 +4,13 @@ An agent skill for asking a non-generative classifier model for a typed answer: 
 
 The skill works in any skills-compatible agent and with any working model. It needs Python 3 and network access to OpenRouter or TypeSafe; nothing in it depends on a particular harness.
 
+> [!WARNING]
+> **This skill sends data to a third-party model.** Every call sends the `state` you supply (item text, facts, summaries) to OpenRouter or TypeSafe, which are cloud services outside your control. Their own retention and logging policies apply.
+>
+> **Do not enable it where data must stay local.** If an environment is supposed to keep all data on the machine or inside your network (client data, personal data, regulated records, secrets), installing this skill there can leak that data. An agent may load the skill on its own when a task looks like classification, and other skills can call its script directly.
+>
+> The skill refuses when a request is marked local-only ("local only", "no cloud", "don't send it anywhere"). That refusal depends on the agent following instructions, so it is not a control. To keep data local, do not install the skill or its script. If you have to install it, leave `OPENROUTER_API_KEY` and `TYPESAFE_API_KEY` unset, or block outbound network access.
+
 ## What you can ask
 
 | Ask the classifier to… | Example |
