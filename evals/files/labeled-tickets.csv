@@ -1,0 +1,61 @@
+id,text,team_label
+t01,Annual plan renewed without a reminder,billing
+t02,Is there a way to schedule reports?,how-to
+t03,Can I pay by bank transfer instead?,billing
+t04,How do I invite a teammate?,how-to
+t05,How do I move a task to another board?,how-to
+t06,Can I restore a deleted page?,how-to
+t07,Timezones shift meeting times by an hour,bug
+t08,Proration looks wrong on my bill,billing
+t09,I was charged twice this month,billing
+t10,Charged in USD instead of EUR,billing
+t11,Notifications arrive twice,bug
+t12,Tax was added to a tax-exempt account,billing
+t13,Coupon code did not apply at checkout,billing
+t14,Password reset link returns a 404,bug
+t15,How do I duplicate a dashboard?,how-to
+t16,What file types can I upload?,how-to
+t17,Login page spins forever on Safari,bug
+t18,Share link opens the wrong document,bug
+t19,Dark mode makes buttons invisible,bug
+t20,Where are archived items stored?,how-to
+t21,Billing email goes to a former employee,billing
+t22,Mobile app logs me out every few minutes,bug
+t23,App freezes when I paste a long table,bug
+t24,Can I export my data to Excel?,how-to
+t25,How do I change my display name?,how-to
+t26,How do I transfer ownership of a project?,how-to
+t27,How do I add a custom field?,how-to
+t28,How do I connect Slack?,how-to
+t29,Refund went to an old card,billing
+t30,Refund still not showing after a week,billing
+t31,Scroll jumps to the top while typing,bug
+t32,Undo does nothing after a bulk edit,bug
+t33,Can I use keyboard shortcuts on mobile?,how-to
+t34,Sync duplicates every calendar event,bug
+t35,Payment failed but account says paid,billing
+t36,Upgraded mid-cycle and got billed full price,billing
+t37,Can guests comment without an account?,how-to
+t38,How do I set up two-factor login?,how-to
+t39,API returns 500 for a valid request,bug
+t40,How do I merge two projects?,how-to
+t41,How do I change the card on file?,billing
+t42,How do I turn off email digests?,how-to
+t43,Dashboard chart shows yesterday's data,bug
+t44,Keyboard shortcut deletes the wrong row,bug
+t45,Need a VAT receipt for March,billing
+t46,Invoice lists the wrong company name,billing
+t47,Two invoices for the same order,billing
+t48,PDF preview is blank,bug
+t49,Where do I change the workspace language?,how-to
+t50,Avatar upload rotates photos sideways,bug
+t51,Search returns results from deleted projects,bug
+t52,Cancel my subscription and stop billing,billing
+t53,Filters reset when I switch tabs,bug
+t54,How do I set a default template?,how-to
+t55,Card declined but the payment went through,billing
+t56,Why did my plan price go up?,billing
+t57,Where do I find the API key?,how-to
+t58,Upload stops at 99 percent,bug
+t59,Charged after I cancelled the trial,billing
+t60,Export to CSV crashes the app,bug

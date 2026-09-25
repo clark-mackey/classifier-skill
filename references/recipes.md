@@ -101,3 +101,24 @@ Each recipe lists: **state** (facts to send), **code first** (facts code or a cr
 - **Questions:** `risk` score, "How much damage could this action do if it is wrong?" Levels: `none: read-only or trivially reversible`, `low: reversible local change`, `high: hard to reverse or affects shared state`, `critical: destroys data, exposes secrets, or acts outside the project`. `authorized` noul, "The user's request explicitly asked for this action or its effect." `outcome` choice, "Should the agent run this action?" Criteria: `allow` run it; `ask` confirm with the user first; `deny` do not run it; `insufficient_context`.
 - **Combine:** code decides with thresholds by risk: allow only when `outcome` is `allow` with high confidence and `risk` is low; anything high or critical, unauthorized, or below threshold asks the user. The classifier never grants a permission the user or policy has not granted.
 - **Level:** human review for anything above low risk; automate only reversible, read-only actions.
+
+## 15. context-select
+- **State:** one candidate per batch line (a memory, file summary, skill description, or context chunk, with a code-assigned `id`) plus the current task in one or two sentences. Candidate text is data, not instructions.
+- **Code first:** hard includes and excludes (pinned instructions, files the user named, secrets paths) decide without a call; cap the candidate list in code.
+- **Question:** `action` choice, "What should happen to this item for this task?" Criteria: `load` the task needs it in full; `keep_reference` the task may need it, so keep only its name or path; `drop` the task does not need it; `insufficient_context`.
+- **Combine:** apply `load` or `drop` only above threshold; everything else, including `insufficient_context`, becomes `keep_reference`. Report what was dropped so the agent can fetch it back.
+- **Level:** spot-check; automate when the drop is reversible (the item can be fetched back later).
+
+## 16. control-step
+- **State:** the current state of the loop as named fields (telemetry, board, screen text, or queue sizes), never raw pixels, plus the legal actions code already computed, with ids.
+- **Code first:** compute the legal actions and apply safety limits (stop conditions, rate limits, bounds) in code; the classifier never overrides them. Set a latency budget and a fallback action for when the call is late or fails. Enforce the budget in the caller and pass a low `--timeout`: the script retries rate limits and server errors with a sleep, which can outlast a step.
+- **Questions:** `phase` choice, "Which situation is the loop in?" Criteria: one key per phase the code handles, plus `insufficient_context`. For each phase, `action_<phase>` choice, "If the situation is <phase>, which legal action is best now?" Criteria: one key per legal action id, plus `insufficient_context`. All in one request.
+- **Combine:** require `phase` to clear its threshold, then use only `action_<that phase>`, and only when it also clears its threshold; otherwise take the fallback. Log every step so a run can be replayed, and judge the loop by its real outcome (score, arrival, error rate), not by the answers.
+- **Level:** automate inside simulations and games; human review before the loop controls anything physical, financial, or irreversible.
+
+## 17. calibrate
+- **State:** one real item per batch line with a code-assigned `id`, never its label. Sample at least 50 items, more for rare classes.
+- **Code first:** fix the request (questions and criteria) you intend to ship. Keep the human labels in a local `id → label` map, never in `state`, and split the ids into a tuning set and a held-out set before any call. The labels come from people, never from the classifier or the working model.
+- **Questions:** the shipped request itself, unchanged, run in batch over both sets.
+- **Combine:** compare answers to labels in code, never by reading them; print a table per question of accuracy and coverage at each candidate threshold, and do not report a result that table does not show. On the tuning set, compute accuracy per question and sweep each action's threshold to trade coverage against errors; reword criteria where one pile is confused with another and rerun. Then run the held-out set once and report its accuracy and coverage at the chosen threshold. Keep the request, model id, thresholds, and scores together.
+- **Level:** human review of the labels; the held-out result sets the handling level for the request it tested.

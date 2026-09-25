@@ -346,6 +346,7 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
         fail("batch file has no states")
 
     total_cost, flagged, invalid, tokens, models = 0.0, 0, 0, 0, set()
+    flags_by_question: dict[str, int] = {}
     started = time.monotonic()
     for number, state in states:
         payload = {**template, "state": state}
@@ -363,6 +364,8 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
             else:
                 review = review_flags(response.get("answers"), args.margin)
                 flagged += bool(review)
+                for question_id in review:
+                    flags_by_question[question_id] = flags_by_question.get(question_id, 0) + 1
                 record = {"line": number, "state": state, "answers": response.get("answers"),
                           "review": review, "model": response.get("model"), "usage": response.get("usage")}
         print(json.dumps(record, ensure_ascii=False, sort_keys=True), flush=True)
@@ -370,8 +373,12 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
         cost = f"cost ${total_cost:.6f}" if total_cost else "cost not reported by provider"
         print(f"classifier-skill: {len(states)} states, {flagged} flagged for review, {invalid} invalid, {cost}",
               file=sys.stderr)
+        if flags_by_question:
+            per_question = ", ".join(f"{q} {n}" for q, n in sorted(flags_by_question.items()))
+            print(f"classifier-skill: flags per question: {per_question}", file=sys.stderr)
         log_call(args, note or {}, template, {
             "mode": "batch", "items": len(states), "flagged": flagged, "invalid": invalid,
+            "flags_by_question": flags_by_question,
             "input_tokens": tokens, "cost": round(total_cost, 8) or None,
             "model": sorted(m for m in models if m), "seconds": round(time.monotonic() - started, 2)})
         if invalid:

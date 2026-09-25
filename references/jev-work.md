@@ -23,7 +23,7 @@ The deciding test: the answer is one of a finite set you can name in advance, it
 | Tag review findings by severity | `score` per finding | code, plan, or document review findings before they are reported |
 | Rank or sort by rubric | `score` per item, sort in code | inbox worst first, backlog by impact |
 | Compare two items | `choice` over relations | duplicate / partial overlap / distinct; same entity or not |
-| Match against supplied candidates | `choice` over candidate ids | best link target, matching FAQ entry, entity resolution |
+| Match against supplied candidates | `choice` over candidate ids | best link target, matching FAQ entry, entity resolution, legal moves or rows code generated |
 | Check a claim against a supplied source | citation-support recipe | supports / contradicts / no evidence |
 | Check a draft against requirements | one `noul` per requirement | covers each brief point, follows each style rule |
 | Check LLM or agent output before it ships | `noul` per rule | answers the question, promises a refund, leaks internal data |
@@ -32,6 +32,14 @@ The deciding test: the answer is one of a finite set you can name in advance, it
 | Pick the next step from enumerated options | `choice` over actions | agent loop: click / type / wait / done, with target ids |
 | Choose among supplied profiles or options | model-choice recipe | model, plan, template, or vendor from a given list |
 | Decide who handles each item next | `choice`: code / LLM / person | intent routing before expensive work |
+| Decide whether an expensive step runs at all | `noul` before the step | wake the model, open the page, call the API |
+| Choose what enters an agent's context | context-select recipe | memories, files, skills, or chunks to keep, drop, or load |
+| Pick the tool or skill before the agent starts | `choice` over supplied tool ids | the agent never reads the full tool list |
+| Control a real-time loop | control-step recipe | a game move, drone or robot action, UI tag while typing |
+| Walk a graph or tree one hop at a time | `choice` over the current node's neighbours | graph traversal, a file tree search, a decision tree |
+| Filter rows by meaning inside a query | `noul` per row, called from SQL or a CLI | a semantic WHERE clause, grep for meaning with an exit code |
+| Fill a column whose values are a known set | `choice` per row over the column's values | label every row of a sheet or table |
+| Re-judge the same items on a schedule | fixed questions per item, compared across runs in code | watchlists, account health, market dimensions |
 
 ## Split
 
@@ -47,6 +55,11 @@ The deciding test: the answer is one of a finite set you can name in advance, it
 | Extract a field whose value is one of a known set | `choice` over the allowed values | free-text or numeric fields stay with code or the LLM |
 | Grade a document against a rubric | `score` per dimension as a first pass | dimensions that need close reading (voice, clarity) score with low confidence; a person or LLM confirms them |
 | Verify claims across sources | supported / contradicted / no evidence per claim, with the excerpt in `state` | retrieving the sources and extracting the claims |
+| Cascade to an LLM | settles the items it is sure about | only items below threshold go to the LLM or a person |
+| Label at scale, then audit | labels every item | an LLM or person grades a random sample; the agreement rate decides whether to trust the rest |
+| Judge a huge repetitive set | one judgment per group | code groups near-identical items (log templates, normalized text) and applies each group's answer to its members |
+| Wrap an LLM step | before: where to look or whether to run; after: check the output | the LLM does the work in between |
+| Tune questions against known answers | answers on a labeled sample | calibrate recipe: code sweeps thresholds and confirms on held-out items |
 
 ## Never
 

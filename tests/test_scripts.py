@@ -290,7 +290,7 @@ class CallLog(unittest.TestCase):
             log = Path(tmp) / "calls.jsonl"
             rows = [{"ts": "2026-09-24T00:00:00+00:00", "recipe": "card-sort", "task": "tag tickets", "items": 10,
                      "flagged": 2, "invalid": 0, "cost": 0.0002, "questions": {"pile": "choice"},
-                     "reshape_noted": True},
+                     "flags_by_question": {"pile": 2}, "reshape_noted": True},
                     {"ts": "2026-09-24T01:00:00+00:00", "items": 1, "flagged": 0, "invalid": 0,
                      "questions": {"q": "noul"}, "reshape_noted": False}]
             log.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
@@ -298,6 +298,7 @@ class CallLog(unittest.TestCase):
             summary = json.loads(result.stdout)
             self.assertEqual((summary["calls"], summary["items"], summary["reshape_noted"]), (2, 11, 1))
             self.assertEqual(summary["by_recipe"]["card-sort"]["flag_rate"], 0.2)
+            self.assertEqual(summary["flags_by_question"], {"pile": 2})
 
 
 
@@ -372,7 +373,7 @@ class CallerContract(unittest.TestCase):
     BAD = {**GOOD, "answers": {**GOOD["answers"], "pile": {"type": "choice", "choice": "c",
                                                            "probabilities": {"a": 0.9, "b": 0.1}}}}
 
-    def call(self, argv, request, replies):
+    def call(self, argv, request, replies, log="off"):
         """Run main() with recorded provider replies; return (exit code, stdout, stderr)."""
         module = load_module()
         queue = list(replies)
@@ -388,7 +389,7 @@ class CallerContract(unittest.TestCase):
                 return False
 
         out, err = io.StringIO(), io.StringIO()
-        env = {"OPENROUTER_API_KEY": "test-not-a-key", "CLASSIFIER_SKILL_LOG": "off"}
+        env = {"OPENROUTER_API_KEY": "test-not-a-key", "CLASSIFIER_SKILL_LOG": log}
         with mock.patch.object(module.urllib.request, "urlopen", lambda req, timeout: Response(queue.pop(0))), \
                 mock.patch.object(sys, "argv", ["jev_decide.py", *argv]), \
                 mock.patch.object(sys, "stdin", io.StringIO(json.dumps(request))), \
@@ -435,11 +436,14 @@ class CallerContract(unittest.TestCase):
     def test_batch_order_line_numbers_and_invalid_lines(self):
         with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as handle:
             handle.write('{"n": 1}\n\n{"n": 2}\n{"n": 3}\n')
-        try:
-            code, out, err = self.call(["--batch", handle.name], {"questions": self.QUESTIONS},
-                                       [self.GOOD, self.BAD, self.GOOD])
-        finally:
-            os.unlink(handle.name)
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "calls.jsonl"
+            try:
+                code, out, err = self.call(["--batch", handle.name], {"questions": self.QUESTIONS},
+                                           [self.GOOD, self.BAD, self.GOOD], log=str(log))
+            finally:
+                os.unlink(handle.name)
+            self.assertEqual(json.loads(log.read_text())["flags_by_question"], {"applies": 2})
         lines = [json.loads(line) for line in out.splitlines()]
         self.assertEqual(code, 3)
         self.assertEqual([(r["line"], r["state"]["n"]) for r in lines], [(1, 1), (3, 2), (4, 3)])
@@ -447,6 +451,7 @@ class CallerContract(unittest.TestCase):
         for record in (lines[0], lines[2]):
             self.assertEqual(set(record) >= {"answers", "review", "model", "usage"}, True)
         self.assertIn("1 invalid", err)
+        self.assertIn("flags per question: applies 2", err)
 
     def test_caller_normalized_and_unknown_reshape_fields_ignored(self):
         module = load_module()

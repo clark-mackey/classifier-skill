@@ -200,6 +200,47 @@
         "The reply shows a Reshape: block before the call",
         "Read-only commands are allowed by a code rule or by a confident classifier answer"
       ]
+    },
+    {
+      "id": 17,
+      "prompt": "Use classifier-skill to decide which of these memory notes a coding agent should load for the task 'fix the flaky login test': 1) 'Auth tests use a fake clock' 2) 'Team lunch is Fridays' 3) 'CI retries network tests twice' 4) 'Prefer tabs in Makefiles' 5) 'Login flow moved to OAuth in March'",
+      "expected_output": "context-select recipe: one action choice per note in batch, load/drop only above threshold, the rest kept as references, drops reported.",
+      "files": [],
+      "assertions": [
+        "recipes.md was read",
+        "A batch call was made with one action choice per note, with no separate needed question",
+        "No note is dropped below threshold; uncertain notes become keep_reference",
+        "The reply lists the dropped notes",
+        "The Reshape block names the recipe on a Recipe: line"
+      ]
+    },
+    {
+      "id": 18,
+      "prompt": "Use classifier-skill to design the decision step for a tic-tac-toe bot that must answer within 300 ms. Code already lists the legal moves.",
+      "expected_output": "control-step recipe: phase choice plus one action_<phase> question per phase in one request, a fallback move, and the budget enforced in the caller.",
+      "files": [],
+      "assertions": [
+        "recipes.md was read",
+        "Each action question states its phase premise",
+        "A fallback action is defined for late or failed calls",
+        "The latency budget is enforced in the caller with a low --timeout",
+        "The Reshape block names the recipe on a Recipe: line"
+      ]
+    },
+    {
+      "id": 19,
+      "prompt": "labeled-tickets.csv has 60 support tickets my team labeled (billing, bug, how-to). Use classifier-skill to calibrate a routing request on them before I automate it.",
+      "expected_output": "calibrate recipe: labels kept out of state, tuning and held-out split before any call, accuracy and threshold computed in code, one held-out run reported.",
+      "files": [
+        "files/labeled-tickets.csv"
+      ],
+      "assertions": [
+        "No team_label value appears in any state sent to the classifier",
+        "The tuning and held-out split is made before the first call",
+        "Accuracy and coverage are computed by code, not estimated in prose",
+        "The held-out set is run once and its accuracy is reported",
+        "The Reshape block names the recipe on a Recipe: line"
+      ]
     }
   ]
 }

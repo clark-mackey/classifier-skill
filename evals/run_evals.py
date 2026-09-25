@@ -121,6 +121,8 @@ def run_case(label, spec, case, variant, n):
     out.mkdir(parents=True, exist_ok=True)
     home, cwd = codex_home(spec, variant == "with_skill"), Path(tempfile.mkdtemp(prefix="jev-eval-"))
     tmp = Path(tempfile.mkdtemp(prefix="jev-eval-tmp-"))
+    for name in case.get("files", []):  # eval inputs, relative to evals/, copied flat into the run's working dir
+        shutil.copy(SKILL / "evals" / name, cwd)
     command = ["sandbox-exec", "-p", seatbelt(home, cwd, out, tmp), "codex", "--ask-for-approval", "never", "exec", "-m", spec["model"], *spec.get("extra", []),
                "--ephemeral", "--skip-git-repo-check", "--json", "--sandbox", "danger-full-access",
                "-c", 'shell_environment_policy.include_only=["PATH","HOME","TMPDIR","ZDOTDIR","CLASSIFIER_SKILL_LOG","OPENROUTER_API_KEY"]',
