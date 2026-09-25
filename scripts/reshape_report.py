@@ -35,17 +35,25 @@ def load(path: Path, since: str | None) -> list[dict]:
     return records
 
 
-def summarize(records: list[dict]) -> dict:
-    by_recipe: dict[str, dict] = defaultdict(lambda: Counter())
-    types, tasks = Counter(), Counter()
+def group(records: list[dict], field: str, missing: str) -> dict[str, dict]:
+    """Per-value totals for one log field, largest item count first."""
+    rows: dict[str, Counter] = defaultdict(Counter)
     for r in records:
-        recipe = r.get("recipe") or "(custom)"
-        row = by_recipe[recipe]
+        row = rows[r.get(field) or missing]
         row["calls"] += 1
         for key in ("items", "flagged", "invalid", "input_tokens"):
             row[key] += r.get(key) or 0
         row["cost"] += r.get("cost") or 0
         row["questions"] += len(r.get("questions") or {})
+    return {k: {**v, "cost": round(v["cost"], 6),
+                "flag_rate": round(v["flagged"] / v["items"], 3) if v["items"] else None,
+                "questions_per_call": round(v["questions"] / v["calls"], 1)}
+            for k, v in sorted(rows.items(), key=lambda kv: -kv[1]["items"])}
+
+
+def summarize(records: list[dict]) -> dict:
+    types, tasks = Counter(), Counter()
+    for r in records:
         types.update((r.get("questions") or {}).values())
         if r.get("task"):
             tasks[r["task"]] += 1
@@ -59,10 +67,8 @@ def summarize(records: list[dict]) -> dict:
         "invalid": sum(r.get("invalid") or 0 for r in records),
         "cost": round(sum(r.get("cost") or 0 for r in records), 6),
         "question_types": dict(types),
-        "by_recipe": {k: {**v, "cost": round(v["cost"], 6),
-                          "flag_rate": round(v["flagged"] / v["items"], 3) if v["items"] else None,
-                          "questions_per_call": round(v["questions"] / v["calls"], 1)}
-                      for k, v in sorted(by_recipe.items(), key=lambda kv: -kv[1]["items"])},
+        "by_recipe": group(records, "recipe", "(custom)"),
+        "by_caller": group(records, "caller", "(direct)"),
         "top_tasks": tasks.most_common(10),
     }
 
@@ -85,10 +91,11 @@ def main() -> None:
     print(f"{summary['calls']} calls, {summary['items']} items, {summary['reshape_noted']} with a reshape note, "
           f"flag rate {summary['flag_rate']}, {summary['invalid']} invalid, cost ${summary['cost']}")
     print(f"question types: {summary['question_types']}")
-    print(f"{'recipe':<22}{'calls':>6}{'items':>7}{'q/call':>8}{'flagged':>9}{'rate':>7}{'cost':>11}")
-    for recipe, row in summary["by_recipe"].items():
-        print(f"{recipe:<22}{row['calls']:>6}{row['items']:>7}{row['questions_per_call']:>8}"
-              f"{row['flagged']:>9}{str(row['flag_rate']):>7}{row['cost']:>11.6f}")
+    for label, rows in (("recipe", summary["by_recipe"]), ("caller", summary["by_caller"])):
+        print(f"{label:<22}{'calls':>6}{'items':>7}{'q/call':>8}{'flagged':>9}{'rate':>7}{'cost':>11}")
+        for name, row in rows.items():
+            print(f"{name:<22}{row['calls']:>6}{row['items']:>7}{row['questions_per_call']:>8}"
+                  f"{row['flagged']:>9}{str(row['flag_rate']):>7}{row['cost']:>11.6f}")
     if summary["top_tasks"]:
         print("most frequent reshaped tasks:")
         for task, count in summary["top_tasks"]:

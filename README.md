@@ -66,6 +66,10 @@ Start your agent fresh from that environment so it discovers the skill and recei
 
 The OpenRouter Decisions endpoint is alpha; TypeSafe's System One API is the direct route with the same request shape. Returned probabilities describe the classifier's preference among the supplied options. They are not success rates. Data you say must stay on your machine is never sent.
 
+## Calling it from another skill
+
+Other skills can call `scripts/jev_decide.py` directly. The supported interface (where to find the script, `--contract-version`, exit codes, output shapes, the `caller` field) is in [references/callers.md](references/callers.md); only what it lists is supported, and its major version changes when anything a caller relies on breaks.
+
 ## Distribution
 
 This repository is the canonical source. `The-Build-Loop/classifier-skill` is a generated mirror, not a second authoring source; do not edit it directly. It mirrors only what is pushed to this repository's `main` on GitHub, never local commits or files. After pushing here, run `python3 scripts/sync_the_build_loop.py` to publish it, or add `--check` to report drift without pushing. The publisher keeps any downstream history and adds a commit carrying the canonical tree on top of it.

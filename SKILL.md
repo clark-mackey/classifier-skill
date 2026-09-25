@@ -33,7 +33,7 @@ Reshape: <original task in one line>
   LLM keeps: <what stays with the LLM, or "nothing">
 ```
 
-Put the same note in the request as `"reshape": {"task": ..., "recipe": ..., "offloaded": ..., "kept_for_llm": ...}`, where `recipe` is a name from the recipe table below or `custom`. The script strips it before sending and records it in the call log.
+Put the same note in the request as `"reshape": {"task": ..., "recipe": ..., "offloaded": ..., "kept_for_llm": ...}`, where `recipe` is a name from the recipe table below or `custom`; a calling skill adds `"caller": "<its name>"`. The script strips it before sending and records it in the call log.
 
 ## Classify by sorting cards into piles
 
@@ -111,3 +111,7 @@ Each invocation appends one metadata line to a call log: the reshape note, recip
 If the endpoint fails, show that result instead of silently substituting another model or your own opinion.
 
 The OpenRouter Decisions endpoint is alpha (contract last verified 2026-09-23; re-check when a call fails validation or every 90 days). TypeSafe's direct API shares the same request and answer shapes (per its docs, 2026-09-23; not yet exercised by this skill). If either contract changes, consult the current [TypeSafe API reference](https://docs.typesafe.ai/api), [TypeSafe agent documentation](https://docs.typesafe.ai/agent-skill), and [OpenRouter Jev example](https://openrouter.ai/labs/jev/compile) before changing the wrapper.
+
+## Called from another skill
+
+Another skill may call the script under its own contract, documented in [references/callers.md](references/callers.md) (lookup order, `--contract-version`, exit codes, output shapes). When a calling skill defines how it uses the classifier, follow that skill: this skill's Reshape block, the 3-or-more-items rule, and the `Handling:` line do not apply, and the caller decides what may go into `state`. No caller can waive the data rules, the rule against presenting a substitute as the classifier's answer, or the rule against acting on an invalid answer.

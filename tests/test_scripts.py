@@ -300,9 +300,6 @@ class CallLog(unittest.TestCase):
             self.assertEqual(summary["by_recipe"]["card-sort"]["flag_rate"], 0.2)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class SyncTheBuildLoop(unittest.TestCase):
     """Publishes to a throwaway bare repository, never the real downstream."""
@@ -356,3 +353,121 @@ class SyncTheBuildLoop(unittest.TestCase):
             self.assertEqual(self.git("--git-dir", remote, "rev-parse", "main^"), divergent)
             canonical_tree = self.git("--git-dir", self.canonical, "rev-parse", "main^{tree}")
             self.assertEqual(self.git("--git-dir", remote, "rev-parse", f"{published}^{{tree}}"), canonical_tree)
+
+
+class CallerContract(unittest.TestCase):
+    """Pins every guarantee in references/callers.md. Provider replies are recorded shapes, never live calls."""
+
+    QUESTIONS = {
+        "severity": {"type": "score", "instructions": "Rate it.", "criteria": ["NIT", "MEDIUM", "HIGH", "BLOCKER"]},
+        "applies": {"type": "noul", "instructions": "Applies?"},
+        "pile": {"type": "choice", "instructions": "Pile?", "criteria": {"a": "x", "b": "y"}},
+    }
+    GOOD = {"model": "typesafe/jev-1.13", "usage": {"input_tokens": 40, "cost": 0.00001},
+            "answers": {"severity": {"type": "score", "score": 2.1, "confidence": 0.9,
+                                     "probabilities": {"0": 0.0, "1": 0.05, "2": 0.85, "3": 0.1}},
+                        "applies": {"type": "noul", "noul": 0.5},
+                        "pile": {"type": "choice", "choice": "a", "probabilities": {"a": 0.9, "b": 0.1},
+                                 "confidence": 0.8}}}
+    BAD = {**GOOD, "answers": {**GOOD["answers"], "pile": {"type": "choice", "choice": "c",
+                                                           "probabilities": {"a": 0.9, "b": 0.1}}}}
+
+    def call(self, argv, request, replies):
+        """Run main() with recorded provider replies; return (exit code, stdout, stderr)."""
+        module = load_module()
+        queue = list(replies)
+
+        class Response:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return io.BytesIO(json.dumps(self.body).encode())
+
+            def __exit__(self, *exc):
+                return False
+
+        out, err = io.StringIO(), io.StringIO()
+        env = {"OPENROUTER_API_KEY": "test-not-a-key", "CLASSIFIER_SKILL_LOG": "off"}
+        with mock.patch.object(module.urllib.request, "urlopen", lambda req, timeout: Response(queue.pop(0))), \
+                mock.patch.object(sys, "argv", ["jev_decide.py", *argv]), \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(request))), \
+                mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err), \
+                mock.patch.dict(os.environ, env):
+            try:
+                module.main()
+                code = 0
+            except SystemExit as exc:
+                code = exc.code
+        return code, out.getvalue(), err.getvalue()
+
+    def test_contract_version_needs_no_input_or_key(self):
+        env = {k: v for k, v in os.environ.items() if k not in ("OPENROUTER_API_KEY", "TYPESAFE_API_KEY")}
+        result = subprocess.run([sys.executable, str(SCRIPTS / "jev_decide.py"), "--contract-version"],
+                                input="", capture_output=True, text=True, env=env)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip().split(".")[0], "1")
+        self.assertIn(f"Contract version **{result.stdout.strip()}**",
+                      (SCRIPTS.parent / "references/callers.md").read_text())
+
+    def test_exit_codes(self):
+        env = {"OPENROUTER_API_KEY": "", "TYPESAFE_API_KEY": "", "CLASSIFIER_PROVIDER": ""}
+        request = {"state": "x", "questions": {"q": {"type": "noul", "instructions": "x?"}}}
+        self.assertEqual(run("jev_decide.py", stdin=json.dumps(request), env=env).returncode, 1)
+        self.assertEqual(run("jev_decide.py", "--dry-run", stdin=json.dumps({"state": "x"})).returncode, 2)
+        code, out, _ = self.call([], {"state": "x", "questions": self.QUESTIONS}, [self.BAD])
+        self.assertEqual(code, 3)
+        self.assertIn("invalid", json.loads(out))
+        self.assertIn("response", json.loads(out))
+
+    def test_single_output_shape(self):
+        code, out, _ = self.call([], {"state": "x", "questions": self.QUESTIONS}, [self.GOOD])
+        self.assertEqual(code, 0)
+        result = json.loads(out)
+        answers = result["answers"]
+        self.assertIsInstance(answers["applies"]["noul"], float)
+        self.assertEqual(round(answers["severity"]["score"]), 2)
+        self.assertIn("confidence", answers["severity"])
+        self.assertEqual(set(answers["pile"]["probabilities"]), {"a", "b"})
+        self.assertEqual(result["review"], {"applies": ["noul 0.50 is near 0.5"]})  # keyed by question id
+        self.assertEqual((result["model"], result["usage"]["cost"]), ("typesafe/jev-1.13", 0.00001))
+
+    def test_batch_order_line_numbers_and_invalid_lines(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as handle:
+            handle.write('{"n": 1}\n\n{"n": 2}\n{"n": 3}\n')
+        try:
+            code, out, err = self.call(["--batch", handle.name], {"questions": self.QUESTIONS},
+                                       [self.GOOD, self.BAD, self.GOOD])
+        finally:
+            os.unlink(handle.name)
+        lines = [json.loads(line) for line in out.splitlines()]
+        self.assertEqual(code, 3)
+        self.assertEqual([(r["line"], r["state"]["n"]) for r in lines], [(1, 1), (3, 2), (4, 3)])
+        self.assertIn("invalid", lines[1])
+        for record in (lines[0], lines[2]):
+            self.assertEqual(set(record) >= {"answers", "review", "model", "usage"}, True)
+        self.assertIn("1 invalid", err)
+
+    def test_caller_normalized_and_unknown_reshape_fields_ignored(self):
+        module = load_module()
+        with mock.patch.object(sys, "stderr", io.StringIO()) as err:
+            note = module.take_reshape({"reshape": {"task": "t", "caller": " Code Owl_v2!", "future": "x"}})
+        self.assertEqual(note["caller"], "code-owl-v2")
+        self.assertNotIn("future", note)
+        self.assertIn("ignoring unknown reshape field(s): future", err.getvalue())
+        request = {"state": "x", "reshape": {"task": "t", "future": "x"},
+                   "questions": {"q": {"type": "noul", "instructions": "x?"}}}
+        self.assertEqual(run("jev_decide.py", "--dry-run", stdin=json.dumps(request)).returncode, 0)
+
+    def test_report_groups_by_caller(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "calls.jsonl"
+            rows = [{"caller": "code-owl", "items": 3, "flagged": 1, "questions": {"s": "score"}},
+                    {"items": 2, "flagged": 0, "questions": {"q": "noul"}}]
+            log.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+            summary = json.loads(run("reshape_report.py", "--log", str(log), "--json").stdout)
+        self.assertEqual({k: v["items"] for k, v in summary["by_caller"].items()}, {"code-owl": 3, "(direct)": 2})
+
+
+if __name__ == "__main__":
+    unittest.main()

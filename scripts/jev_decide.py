@@ -15,6 +15,7 @@ import http.client
 import json
 import math
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -38,7 +39,10 @@ MAX_OPTIONS = 250  # larger option sets must be pre-filtered or split in code
 RETRY_STATUSES = {429, 500, 502, 503, 504, 529}  # a classification call has no side effects, so retrying is safe
 RETRY_DELAYS = (0.5, 1.0)
 ALLOWED_FIELDS = {"model", "state", "questions", "provider", "trace", "session_id", "user"}
-RESHAPE_FIELDS = {"task", "recipe", "offloaded", "kept_for_llm"}  # local-only notes, never sent to the provider
+RESHAPE_FIELDS = {"task", "recipe", "offloaded", "kept_for_llm", "caller"}  # local-only notes, never sent
+# The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
+# change that could break a caller; callers skip their classifier step when the major version differs.
+CONTRACT_VERSION = "1.0"
 
 
 def fail(message: str, code: int = 2) -> NoReturn:
@@ -252,14 +256,27 @@ def known_recipes() -> set[str] | None:
             if line.startswith("## ") and "." in line and line[3:].split(".", 1)[0].strip().isdigit()}
 
 
+def caller_slug(name: str) -> str:
+    """Normalize a calling skill's name so the log groups it once: "Code Owl" and "code_owl" become "code-owl"."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")[:40].strip("-")
+    return slug or "unknown"
+
+
 def take_reshape(payload: dict[str, Any]) -> dict[str, str]:
     """Remove the local `reshape` note from the payload and validate it; it is logged, never sent."""
     note = payload.pop("reshape", None)
     if note is None:
         return {}
-    if not isinstance(note, dict) or set(note) - RESHAPE_FIELDS or not all(
-            isinstance(v, str) and v.strip() for v in note.values()):
+    if not isinstance(note, dict):
         fail(f"reshape must be an object of non-empty strings with keys from: {', '.join(sorted(RESHAPE_FIELDS))}")
+    unknown = sorted(set(note) - RESHAPE_FIELDS)
+    if unknown:  # forward-compatible: a caller written for a newer contract still gets its answers
+        print(f"classifier-skill: ignoring unknown reshape field(s): {', '.join(unknown)}", file=sys.stderr)
+        note = {k: v for k, v in note.items() if k in RESHAPE_FIELDS}
+    if not all(isinstance(v, str) and v.strip() for v in note.values()):
+        fail(f"reshape must be an object of non-empty strings with keys from: {', '.join(sorted(RESHAPE_FIELDS))}")
+    if "caller" in note:
+        note["caller"] = caller_slug(note["caller"])
     recipes = known_recipes()
     recipe = note.get("recipe", "custom").strip()
     if recipe != "custom" and recipes is not None and recipe not in recipes:
@@ -374,7 +391,12 @@ def main() -> None:
                         help="apply the request (without state) to each JSONL line; one JSON result per line")
     parser.add_argument("--margin", type=float, default=0.2,
                         help="flag a choice for review when the top two probabilities are closer than this")
+    parser.add_argument("--contract-version", action="store_true",
+                        help="print the caller contract version (references/callers.md) and exit")
     args = parser.parse_args()
+    if args.contract_version:
+        print(CONTRACT_VERSION)
+        return
 
     args.provider = select_provider(args.provider)
     spec = PROVIDERS[args.provider]
