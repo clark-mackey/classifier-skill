@@ -1,6 +1,6 @@
 # Calling the classifier from another skill
 
-Contract version **1.0**. This is the interface other skills may rely on; anything not listed here can change without notice. Tests in `tests/test_scripts.py` (`CallerContract`) pin every guarantee below.
+Contract version **1.1**. This is the interface other skills may rely on; anything not listed here can change without notice. Tests in `tests/test_scripts.py` (`CallerContract`) pin every guarantee below.
 
 ## Find the script
 
@@ -14,13 +14,15 @@ None found: skip your classifier step and say so.
 
 ## Check the version
 
-`python3 <script> --contract-version` prints the version (`1.0`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions only add.
+`python3 <script> --contract-version` prints the version (`1.1`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions only add.
 
 ## Call
 
 - The request is JSON on stdin (or `--request-file PATH`): `state`, `questions`, and optionally `model` and `reshape`. Question shapes are in SKILL.md.
 - `--batch FILE`: the request carries no `state`; FILE holds one JSON state per line. Create it with `mktemp`, never a fixed path.
 - `--timeout SECONDS` bounds each HTTP request (default 30). A request retries at most twice on 429, 5xx, and network errors, waiting 0.5 and 1 second (or a `retry-after` of up to 10 seconds), so one request can take about three times the timeout plus 20 seconds. A batch sends one request per line; bound the whole call yourself when that matters.
+- `--provider openrouter|typesafe|compatible` picks the provider (default: `CLASSIFIER_PROVIDER`, else whichever Jev key is set; `compatible` only when named). Configuration for `compatible` is in `references/providers.md`.
+- `--local-only` refuses, with exit 1 and before sending anything, unless the endpoint is on this machine. Pass it whenever your data must stay local.
 - `--dry-run` validates and prints the outgoing payload without sending it or needing a key. Use it to test your requests.
 - Feed requests through a quoted heredoc or a file; never splice text into a command line.
 
@@ -61,4 +63,5 @@ A calling skill may replace this skill's workflow for its own purpose: the Resha
 
 ## Changelog
 
+- **1.1** (2026-09-25): `compatible` provider for any server speaking the same shapes; `--local-only`.
 - **1.0** (2026-09-24): first published contract: lookup order, `--contract-version`, exit codes, output shapes, the `caller` field, unknown reshape fields ignored.

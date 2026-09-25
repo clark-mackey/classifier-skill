@@ -32,7 +32,14 @@ PROVIDERS = {
     "typesafe": {"endpoint": "https://api.typesafe.ai/v1/systemone", "host": "api.typesafe.ai",
                  "key": "TYPESAFE_API_KEY", "model": "jev-1.13.0", "name": "TypeSafe",
                  "fields": {"model", "state", "questions"}},  # System One accepts no routing extras
+    # Any server that speaks the same request and answer shapes (references/providers.md): a self-hosted open
+    # model, a Hugging Face Inference Endpoint, or another hosted API. Configured by environment, chosen only
+    # explicitly, and its optional key is only ever sent to the configured URL's host.
+    "compatible": {"url_env": "CLASSIFIER_COMPATIBLE_URL", "key": "CLASSIFIER_COMPATIBLE_KEY",
+                   "model_env": "CLASSIFIER_COMPATIBLE_MODEL", "name": "compatible server",
+                   "key_optional": True, "explicit": True, "fields": {"model", "state", "questions"}},
 }
+LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}  # the only hosts plain http and --local-only accept
 MAX_RETRY_AFTER = 10.0  # seconds; a longer retry-after is reported rather than waited out
 FALLBACK_OPTIONS = {"insufficient_context", "insufficient_evidence", "none_fit"}
 MAX_OPTIONS = 250  # larger option sets must be pre-filtered or split in code
@@ -42,7 +49,7 @@ ALLOWED_FIELDS = {"model", "state", "questions", "provider", "trace", "session_i
 RESHAPE_FIELDS = {"task", "recipe", "offloaded", "kept_for_llm", "caller"}  # local-only notes, never sent
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "1.1"
 
 
 def fail(message: str, code: int = 2) -> NoReturn:
@@ -106,7 +113,7 @@ def select_provider(requested: str | None) -> str:
             fail(f"unknown provider {name!r}; use one of: {', '.join(PROVIDERS)}")
         return name
     for candidate, spec in PROVIDERS.items():
-        if os.environ.get(spec["key"], "").strip():
+        if not spec.get("explicit") and os.environ.get(spec["key"], "").strip():
             return candidate
     return "openrouter"
 
@@ -134,28 +141,52 @@ def normalize_request(raw: dict[str, Any], model_override: str | None, batch: bo
     payload = dict(raw)
     payload["model"] = model_override or payload.get("model") or default_model
     if not isinstance(payload["model"], str) or not payload["model"].strip():
-        fail("model must be a non-empty string")
+        fail("model must be a non-empty string (for provider compatible, set CLASSIFIER_COMPATIBLE_MODEL or pass --model)")
     return payload
+
+
+def provider_endpoint(provider: str) -> str:
+    """The provider's default endpoint; the compatible provider's comes from its environment variable."""
+    spec = PROVIDERS[provider]
+    if "url_env" not in spec:
+        override = os.environ.get("OPENROUTER_DECISIONS_URL") if provider == "openrouter" else None
+        return override or spec["endpoint"]
+    url = os.environ.get(spec["url_env"], "").strip()
+    if not url:
+        fail(f"{spec['url_env']} is not set; provider {provider} needs the server's full request URL", code=1)
+    return url
+
+
+def check_endpoint(provider: str, endpoint: str) -> None:
+    """Refuse any endpoint off the provider's host. Plain http is allowed only for a server on this machine."""
+    spec = PROVIDERS[provider]
+    parsed = urlparse(endpoint)
+    host = spec.get("host") or urlparse(provider_endpoint(provider)).hostname
+    local_http = parsed.scheme == "http" and parsed.hostname in LOOPBACK_HOSTS and "url_env" in spec
+    if parsed.hostname != host or not (parsed.scheme == "https" or local_http):
+        allowed = f"https://{host}" + (" (or http on localhost)" if "url_env" in spec else "")
+        fail(f"refusing to send credentials to {endpoint!r}; {provider} only allows {allowed}", code=1)
+
+
+def is_local(endpoint: str) -> bool:
+    return urlparse(endpoint).hostname in LOOPBACK_HOSTS
 
 
 def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: str = "openrouter") -> dict[str, Any]:
     spec = PROVIDERS[provider]
-    parsed = urlparse(endpoint)
-    if parsed.scheme != "https" or parsed.hostname != spec["host"]:
-        fail(f"refusing to send credentials to {endpoint!r}; {provider} only allows https://{spec['host']}", code=1)
+    check_endpoint(provider, endpoint)
     api_key = os.environ.get(spec["key"], "").strip()
-    if not api_key:
+    if not api_key and not spec.get("key_optional"):
         fail(f"{spec['key']} is not available for provider {provider}", code=1)
     service = spec["name"]
+    headers = {"Content-Type": "application/json", "User-Agent": "classifier-skill/1.0"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     request = urllib.request.Request(
         endpoint,
         data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": "classifier-skill/1.0",
-        },
+        headers=headers,
         method="POST",
     )
     for attempt in range(len(RETRY_DELAYS) + 1):
@@ -389,8 +420,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request-file", default="-", help="JSON request file, or - for stdin")
     parser.add_argument("--provider", choices=sorted(PROVIDERS),
-                        help="openrouter or typesafe (default: CLASSIFIER_PROVIDER, else whichever API key is set)")
-    parser.add_argument("--model", help="override the model (default: the provider's pinned Jev version)")
+                        help="openrouter, typesafe, or compatible (default: CLASSIFIER_PROVIDER, else whichever "
+                             "Jev API key is set; compatible is never chosen automatically)")
+    parser.add_argument("--model", help="override the model (default: the provider's pinned Jev version, or "
+                                        "CLASSIFIER_COMPATIBLE_MODEL for compatible)")
+    parser.add_argument("--local-only", action="store_true",
+                        help="refuse to send unless the endpoint is on this machine (localhost)")
     parser.add_argument("--endpoint", help="override the provider's endpoint (must stay on that provider's host)")
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--dry-run", action="store_true", help="validate and print the payload without sending it")
@@ -407,11 +442,12 @@ def main() -> None:
 
     args.provider = select_provider(args.provider)
     spec = PROVIDERS[args.provider]
-    if not args.endpoint:
-        override = os.environ.get("OPENROUTER_DECISIONS_URL") if args.provider == "openrouter" else None
-        args.endpoint = override or spec["endpoint"]
+    args.endpoint = args.endpoint or provider_endpoint(args.provider)
+    if args.local_only and not is_local(args.endpoint):
+        fail(f"--local-only: refusing to send to {args.endpoint!r}, which is not on this machine", code=1)
+    default_model = spec.get("model") or os.environ.get(spec.get("model_env", ""), "").strip()
     payload = normalize_request(load_request(args.request_file), args.model, batch=bool(args.batch),
-                                default_model=spec["model"])
+                                default_model=default_model)
     note = take_reshape(payload)
     extras = sorted(set(payload) - spec.get("fields", ALLOWED_FIELDS))
     if extras:

@@ -244,6 +244,77 @@ class Providers(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("TYPESAFE_API_KEY", result.stderr)
 
+    COMPATIBLE = {"CLASSIFIER_COMPATIBLE_URL": "http://localhost:8000/v1/decide",
+                  "CLASSIFIER_COMPATIBLE_MODEL": "laya-421m", "CLASSIFIER_COMPATIBLE_KEY": ""}
+
+    def test_compatible_is_never_chosen_automatically(self):
+        env = {**self.COMPATIBLE, "CLASSIFIER_COMPATIBLE_KEY": "k"}
+        self.assertEqual(self.dry(env=env), "typesafe/jev-1.13")
+        self.assertEqual(self.dry("--provider", "compatible", env=env), "laya-421m")
+        self.assertEqual(self.dry(env={**env, "CLASSIFIER_PROVIDER": "compatible"}), "laya-421m")
+
+    def test_compatible_needs_url_and_model(self):
+        no_url = run("jev_decide.py", "--dry-run", "--provider", "compatible", stdin=self.REQUEST,
+                     env={**self.COMPATIBLE, "CLASSIFIER_COMPATIBLE_URL": ""})
+        self.assertEqual(no_url.returncode, 1)
+        self.assertIn("CLASSIFIER_COMPATIBLE_URL", no_url.stderr)
+        no_model = run("jev_decide.py", "--dry-run", "--provider", "compatible", stdin=self.REQUEST,
+                       env={**self.COMPATIBLE, "CLASSIFIER_COMPATIBLE_MODEL": ""})
+        self.assertEqual(no_model.returncode, 2)
+        self.assertIn("CLASSIFIER_COMPATIBLE_MODEL", no_model.stderr)
+
+    def test_compatible_allows_http_only_on_this_machine(self):
+        module = load_module()
+        allowed = ("http://localhost:8000/v1/decide", "http://127.0.0.1:1234/x", "https://x.endpoints.example/decide")
+        refused = (("http://models.example/decide", "http://models.example/decide"),
+                   ("https://a.example/decide", "https://b.example/decide"),
+                   ("http://localhost:8000/v1/decide", "http://127.0.0.1:8000/v1/decide"))
+        for url in allowed:
+            with self.subTest(url=url), mock.patch.dict(os.environ, {"CLASSIFIER_COMPATIBLE_URL": url}):
+                module.check_endpoint("compatible", url)
+        for url, endpoint in refused:
+            with self.subTest(endpoint=endpoint), mock.patch.dict(os.environ, {"CLASSIFIER_COMPATIBLE_URL": url}), \
+                    mock.patch.object(sys, "stderr", io.StringIO()), self.assertRaises(SystemExit) as caught:
+                module.check_endpoint("compatible", endpoint)
+            self.assertEqual(caught.exception.code, 1)
+
+    def test_local_only_refuses_any_remote_endpoint_before_sending(self):
+        for args, env in ((["--provider", "openrouter"], {"OPENROUTER_API_KEY": "k"}),
+                          (["--provider", "compatible"], {**self.COMPATIBLE,
+                                                          "CLASSIFIER_COMPATIBLE_URL": "https://x.example/decide"})):
+            with self.subTest(args=args):
+                result = run("jev_decide.py", "--local-only", *args, stdin=self.REQUEST, env=env)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("--local-only", result.stderr)
+        self.assertEqual(self.dry("--provider", "compatible", "--local-only", env=self.COMPATIBLE), "laya-421m")
+
+    def test_compatible_sends_no_key_when_none_is_set_and_validates_answers(self):
+        module = load_module()
+        sent = []
+        reply = {"model": "laya-421m", "answers": {"q": {"type": "noul", "noul": 0.9}}}
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(req, timeout):
+            sent.append(req)
+            return Response(json.dumps(reply).encode())
+
+        out = io.StringIO()
+        with mock.patch.object(module.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(sys, "argv", ["jev_decide.py", "--provider", "compatible", "--local-only"]), \
+                mock.patch.object(sys, "stdin", io.StringIO(self.REQUEST)), mock.patch.object(sys, "stdout", out), \
+                mock.patch.dict(os.environ, {**self.COMPATIBLE, "CLASSIFIER_SKILL_LOG": "off"}):
+            module.main()
+        self.assertIsNone(sent[0].get_header("Authorization"))
+        self.assertEqual(sent[0].full_url, self.COMPATIBLE["CLASSIFIER_COMPATIBLE_URL"])
+        self.assertEqual(set(json.loads(sent[0].data)), {"model", "state", "questions"})
+        self.assertEqual(json.loads(out.getvalue())["answers"]["q"]["noul"], 0.9)
+
 
 class CallLog(unittest.TestCase):
     def test_reshape_note_logged_not_sent_and_state_never_logged(self):
