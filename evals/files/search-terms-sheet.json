@@ -1,0 +1,22 @@
+{
+  "sheet": "eval-med-spa-terms",
+  "version": 1,
+  "contract": "1.3",
+  "recipe": "search-intent@1",
+  "data": "cloud_ok",
+  "min_items": 20,
+  "model": "typesafe/jev-1.13",
+  "fields": {
+    "id": "id",
+    "card": [
+      "term"
+    ]
+  },
+  "context": "Harbor Aesthetics is a fictional med spa in Portland, Oregon. It offers Botox and other neurotoxins, dermal and lip fillers, Kybella, Sculptra, laser hair removal, CoolSculpting, HydraFacials, chemical peels, and microneedling. It does not offer surgery, hair, nail, massage, dental, tattoo, or weight-loss services.",
+  "questions": {
+    "intent": {
+      "threshold": 0.7
+    }
+  },
+  "consumes": "Eval only: `intent` is scored against label_intent by scripts/score_labels.py."
+}

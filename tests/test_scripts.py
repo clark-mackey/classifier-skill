@@ -694,3 +694,322 @@ class ReviewFixes(unittest.TestCase):
                        "Review this diff and label each finding by severity."):
             with self.subTest(prompt=prompt):
                 self.assertTrue(self.hook.wants_nudge(prompt))
+
+
+class BatchPartialFailure(unittest.TestCase):
+    """A request that fails mid-batch keeps the answers already printed, says where it stopped, and logs the run."""
+
+    def test_stops_with_summary_and_log(self):
+        module = load_module()
+        good = {"model": "typesafe/jev-1.13", "answers": {"q": {"type": "noul", "noul": 0.9}}}
+        replies = [good, OSError("network down"), OSError("network down"), OSError("network down")]
+
+        class Response:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return io.BytesIO(json.dumps(self.body).encode())
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(request, timeout):
+            reply = replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return Response(reply)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            batch, log = Path(tmp) / "states.jsonl", Path(tmp) / "calls.jsonl"
+            batch.write_text('"one"\n"two"\n"three"\n')
+            out, err = io.StringIO(), io.StringIO()
+            template = {"questions": {"q": {"type": "noul", "instructions": "Billing?"}}}
+            with mock.patch.object(module.urllib.request, "urlopen", urlopen), \
+                    mock.patch.object(module.time, "sleep"), \
+                    mock.patch.object(sys, "argv", ["jev_decide.py", "--batch", str(batch)]), \
+                    mock.patch.object(sys, "stdin", io.StringIO(json.dumps(template))), \
+                    mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err), \
+                    mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-not-a-key",
+                                                 "CLASSIFIER_SKILL_LOG": str(log)}), \
+                    self.assertRaises(SystemExit) as caught:
+                module.main()
+            self.assertEqual(caught.exception.code, 1)
+            self.assertEqual([json.loads(l)["line"] for l in out.getvalue().splitlines()], [1])
+            self.assertIn("stopped at batch line 2", err.getvalue())
+            record = json.loads(log.read_text().splitlines()[-1])
+            self.assertEqual((record["stopped_at_line"], record["answered"]), (2, 1))
+
+
+def load_engine():
+    spec = importlib.util.spec_from_file_location("classify_items", SCRIPTS / "classify_items.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class ItemsEngine(unittest.TestCase):
+    """classify_items.py: contract 1.3. Provider replies are recorded shapes, never live calls."""
+
+    SHEET = {"sheet": "test-terms", "version": 2, "contract": "1.3", "data": "cloud_ok", "min_items": 2,
+             "fields": {"id": "term", "card": ["term", "campaign"]}, "context": "A dental clinic.",
+             "questions": {
+                 "pile": {"type": "choice", "instructions": "Pile?", "threshold": 0.7,
+                          "criteria": {"keep": "k", "drop": "d", "none_fit": "neither"}},
+                 "relevant": {"type": "noul", "instructions": "Relevant?", "threshold": 0.9}}}
+
+    @staticmethod
+    def answer(choice="keep", confidence=0.9, noul=0.95):
+        others = [o for o in ("keep", "drop", "none_fit") if o != choice]
+        probabilities = {choice: confidence, others[0]: round(1 - confidence, 6), others[1]: 0.0}
+        return {"model": "typesafe/jev-1.13", "usage": {"input_tokens": 30, "cost": 0.00001},
+                "answers": {"pile": {"type": "choice", "choice": choice, "confidence": confidence,
+                                     "probabilities": probabilities},
+                            "relevant": {"type": "noul", "noul": noul}}}
+
+    def judge(self, items, replies, sheet=None, env=None, argv=()):
+        """Run the engine; return (exit code, output lines, summary or None, sent payloads, stderr)."""
+        module = load_engine()
+        queue, sent = list(replies), []
+
+        class Response:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return io.BytesIO(json.dumps(self.body).encode())
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(request, timeout):
+            sent.append(json.loads(request.data))
+            reply = queue.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return Response(reply)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {name: Path(tmp) / name for name in ("sheet.json", "items.jsonl", "out.jsonl", "summary.json")}
+            paths["sheet.json"].write_text(json.dumps(sheet or self.SHEET))
+            paths["items.jsonl"].write_text("".join(json.dumps(i) + "\n" for i in items))
+            err = io.StringIO()
+            argv = ["classify_items.py", "--sheet", str(paths["sheet.json"]), "--items", str(paths["items.jsonl"]),
+                    "--out", str(paths["out.jsonl"]), "--summary", str(paths["summary.json"]), *argv]
+            code = 0
+            with mock.patch.object(module.jev.urllib.request, "urlopen", urlopen), \
+                    mock.patch.object(module.jev.time, "sleep"), mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(sys, "stderr", err), \
+                    mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-not-a-key",
+                                                 "CLASSIFIER_SKILL_LOG": "off", **(env or {})}):
+                try:
+                    module.main()
+                except SystemExit as exc:
+                    code = exc.code
+            lines = ([json.loads(l) for l in paths["out.jsonl"].read_text().splitlines()]
+                     if paths["out.jsonl"].exists() else [])
+            summary = json.loads(paths["summary.json"].read_text()) if paths["summary.json"].exists() else None
+        return code, lines, summary, sent, err.getvalue()
+
+    ITEMS = [{"term": f"term {n}", "campaign": "Implants", "cost": 12.5} for n in range(4)]
+
+    def test_every_id_once_in_order_with_versions(self):
+        code, lines, summary, _, err = self.judge(self.ITEMS, [self.answer()] * 4)
+        self.assertEqual(code, 0)
+        self.assertEqual([l["id"] for l in lines], [i["term"] for i in self.ITEMS])
+        self.assertTrue(all(l["versions"] == {"sheet": "test-terms@2", "recipe": None, "model": "typesafe/jev-1.13",
+                                              "contract": "1.3"} for l in lines))
+        self.assertEqual((summary["complete"], summary["items_in"], summary["items_out"], summary["answered"]),
+                         (True, 4, 4, 4))
+        self.assertIn("Classifier: 4/0/0 (none)", err)
+
+    def test_duplicate_ids_exit_2_before_sending(self):
+        code, lines, summary, sent, _ = self.judge([self.ITEMS[0], self.ITEMS[0]], [])
+        self.assertEqual((code, lines, summary, sent), (2, [], None, []))
+
+    def test_transport_failure_keeps_earlier_answers(self):
+        replies = [self.answer(), OSError("down"), OSError("down"), OSError("down")]
+        code, lines, summary, sent, _ = self.judge(self.ITEMS, replies)
+        self.assertEqual(code, 0)
+        self.assertEqual([l["status"] for l in lines], ["answered", "unanswered", "unanswered", "unanswered"])
+        self.assertEqual([l.get("reason") for l in lines], [None, "transport", "not_sent", "not_sent"])
+        self.assertEqual(summary["unanswered"], {"transport": 1, "not_sent": 2})
+        self.assertTrue(summary["complete"] and summary["degraded"])
+        self.assertEqual(len(sent), 4)  # one success plus three tries of the failing item; nothing after
+
+    def test_invalid_answer_affects_only_that_item(self):
+        bad = self.answer()
+        bad["answers"]["pile"]["choice"] = "maybe"
+        code, lines, summary, _, _ = self.judge(self.ITEMS, [self.answer(), bad, self.answer(), self.answer()])
+        self.assertEqual([l.get("reason") for l in lines], [None, "invalid_answer", None, None])
+        self.assertEqual((summary["answered"], summary["unanswered"]), (3, {"invalid_answer": 1}))
+
+    def test_below_min_items_sends_nothing(self):
+        code, lines, summary, sent, _ = self.judge(self.ITEMS[:1], [])
+        self.assertEqual((code, sent), (0, []))
+        self.assertEqual(lines[0]["reason"], "below_min_items")
+        self.assertTrue(summary["bypass"])
+        self.assertFalse(summary["degraded"])
+
+    def test_recurring_sheet_runs_a_single_item(self):
+        code, lines, _, sent, _ = self.judge(self.ITEMS[:1], [self.answer()], sheet={**self.SHEET, "recurring": True})
+        self.assertEqual((len(sent), lines[0]["status"]), (1, "answered"))
+
+    def test_only_card_fields_and_context_are_sent(self):
+        _, _, _, sent, _ = self.judge(self.ITEMS[:2], [self.answer()] * 2)
+        self.assertEqual(sent[0]["state"], {"context": "A dental clinic.", "item": {"term": "term 0",
+                                                                                     "campaign": "Implants"}})
+        self.assertNotIn("threshold", json.dumps(sent[0]["questions"]))
+
+    def test_dispositions_follow_thresholds(self):
+        replies = [self.answer(confidence=0.9, noul=0.95),   # both confident
+                   self.answer(confidence=0.6, noul=0.02),   # pile below 0.7; relevant confidently false
+                   self.answer(choice="none_fit", confidence=0.95, noul=0.5),  # fallback; noul near 0.5
+                   self.answer(confidence=0.9, noul=0.8)]    # relevant between thresholds
+        _, lines, summary, _, _ = self.judge(self.ITEMS, replies)
+        self.assertEqual([l["dispositions"] for l in lines], [
+            {"pile": "answered", "relevant": "answered"}, {"pile": "human", "relevant": "skip"},
+            {"pile": "human", "relevant": "human"}, {"pile": "answered", "relevant": "human"}])
+        self.assertEqual((summary["human_by_question"], summary["skip_by_question"]),
+                         ({"pile": 2, "relevant": 2}, {"relevant": 1}))
+
+    def test_local_only_sheet_refuses_cloud_endpoint(self):
+        code, lines, summary, sent, _ = self.judge(self.ITEMS, [], sheet={**self.SHEET, "data": "local_only"})
+        self.assertEqual((code, sent), (0, []))
+        self.assertEqual(summary["unanswered"], {"refused_host": 4})
+
+    def test_auth_failure_stops_with_no_key(self):
+        module = load_module()
+        denied = module.urllib.error.HTTPError("https://openrouter.ai", 401, "no", {}, io.BytesIO(b"bad key"))
+        _, _, summary, sent, _ = self.judge(self.ITEMS, [denied])
+        self.assertEqual((len(sent), summary["unanswered"]), (1, {"no_key": 4}))
+
+    def test_recipe_questions_merge_with_sheet(self):
+        sheet = {**self.SHEET, "recipe": "search-intent@1",
+                 "questions": {"intent": {"threshold": 0.6}, **self.SHEET["questions"]}}
+        _, _, _, sent, _ = self.judge(self.ITEMS[:2], [], sheet=sheet, argv=["--dry-run"])
+        self.assertEqual(sent, [])  # dry run sends nothing
+        module = load_engine()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sheet.json"
+            path.write_text(json.dumps(sheet))
+            _, questions, thresholds = module.load_sheet(str(path))
+        self.assertEqual(set(questions), {"intent", "pile", "relevant"})
+        self.assertEqual(thresholds["intent"], 0.6)
+        self.assertIn("wants_service", questions["intent"]["criteria"])
+
+    def test_bad_sheets_exit_2(self):
+        for change in ({"contract": "2.0"}, {"data": "anywhere"}, {"fields": {"card": []}}, {"extra": 1},
+                       {"recipe": "missing@1"}, {"questions": {"pile": {**self.SHEET["questions"]["pile"],
+                                                                        "threshold": 0.3}}}):
+            with self.subTest(change=change):
+                code, _, summary, sent, _ = self.judge(self.ITEMS, [], sheet={**self.SHEET, **change})
+                self.assertEqual((code, summary, sent), (2, None, []))
+
+    def test_contract_version(self):
+        result = run("classify_items.py", "--contract-version")
+        self.assertEqual(result.stdout.strip(), "1.3")
+
+    def test_malformed_responses_are_invalid_not_crashes(self):
+        extra = self.answer()
+        extra["answers"]["surprise"] = {"type": "noul", "noul": 0.9}
+        odd_usage = {**self.answer(), "usage": {"cost": "unknown", "input_tokens": "many"}}
+        replies = [[], extra, {**self.answer(), "usage": []}, odd_usage]
+        code, lines, summary, _, _ = self.judge(self.ITEMS, replies)
+        self.assertEqual(code, 0)
+        self.assertEqual([l.get("reason") for l in lines], ["invalid_answer"] * 3 + [None])
+        self.assertTrue(summary["complete"])
+
+    def test_old_summary_is_removed_before_a_run(self):
+        module = load_engine()
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = Path(tmp) / "summary.json"
+            summary.write_text('{"complete": true, "items_out": 4}')
+            sheet, items = Path(tmp) / "sheet.json", Path(tmp) / "items.jsonl"
+            sheet.write_text(json.dumps(self.SHEET))
+            items.write_text("".join(json.dumps(i) + "\n" for i in self.ITEMS))
+            argv = ["classify_items.py", "--sheet", str(sheet), "--items", str(items), "--out",
+                    str(Path(tmp) / "out.jsonl"), "--summary", str(summary)]
+
+            def crash(request, timeout):
+                raise KeyboardInterrupt
+
+            with mock.patch.object(module.jev.urllib.request, "urlopen", crash), mock.patch.object(sys, "argv", argv), \
+                    mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-not-a-key", "CLASSIFIER_SKILL_LOG": "off"}), \
+                    self.assertRaises(KeyboardInterrupt):
+                module.main()
+            self.assertFalse(summary.exists())
+
+    def test_out_and_summary_must_differ(self):
+        module = load_engine()
+        with tempfile.TemporaryDirectory() as tmp:
+            same = str(Path(tmp) / "result.json")
+            argv = ["classify_items.py", "--sheet", "x", "--items", "y", "--out", same, "--summary", same]
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(sys, "stderr", io.StringIO()), \
+                    self.assertRaises(SystemExit) as caught:
+                module.main()
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_bad_margin_exits_before_sending(self):
+        for margin in ("wide", -0.1, 1.5):
+            with self.subTest(margin=margin):
+                code, _, _, sent, _ = self.judge(self.ITEMS, [], sheet={**self.SHEET, "margin": margin})
+                self.assertEqual((code, sent), (2, []))
+
+    def test_payload_too_large_for_provider(self):
+        module = load_module()
+        big = module.urllib.error.HTTPError("https://openrouter.ai", 413, "big", {}, io.BytesIO(b"too big"))
+        _, lines, _, _, _ = self.judge(self.ITEMS, [big])
+        self.assertEqual(lines[0]["reason"], "too_large")
+
+
+class ScoreLabels(unittest.TestCase):
+    def test_accuracy_coverage_and_holdout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            labels, answers = Path(tmp) / "labels.jsonl", Path(tmp) / "answers.jsonl"
+            labels.write_text("".join(json.dumps({"id": f"i{n}", "label": "a" if n % 2 else "b"}) + "\n"
+                                      for n in range(20)))
+            lines = []
+            for n in range(20):
+                truth = "a" if n % 2 else "b"
+                pick, conf = (truth, 0.95) if n < 16 else ("a" if truth == "b" else "b", 0.55)
+                lines.append({"id": f"i{n}", "status": "answered", "answers": {"q": {
+                    "type": "choice", "choice": pick, "confidence": conf}}})
+            lines.append({"id": "i99", "answer": "a"})  # unlabeled lines are ignored
+            answers.write_text("".join(json.dumps(l) + "\n" for l in lines))
+            result = run("score_labels.py", "--answers", str(answers), "--labels", str(labels), "--question", "q",
+                         "--target", "0.9")
+        report = json.loads(result.stdout)
+        self.assertEqual(report["all"]["accuracy"], 0.8)
+        self.assertEqual(report["all"]["at_threshold"]["0.9"],
+                         {"coverage": 0.8, "accuracy": 1.0, "correct": 16, "kept": 16})
+        self.assertEqual(report["calibration"]["holdout_items"], 10)
+        self.assertIsNotNone(report["calibration"]["threshold"])
+
+    def score(self, labels, answers, *extra):
+        with tempfile.TemporaryDirectory() as tmp:
+            lpath, apath = Path(tmp) / "labels.jsonl", Path(tmp) / "answers.jsonl"
+            lpath.write_text("".join(json.dumps(l) + "\n" for l in labels))
+            apath.write_text("".join(json.dumps(a) + "\n" for a in answers))
+            result = run("score_labels.py", "--answers", str(apath), "--labels", str(lpath), "--question", "q", *extra)
+        return json.loads(result.stdout)
+
+    def test_missing_answers_count_against_recall(self):
+        report = self.score([{"id": "1", "label": "a"}, {"id": "2", "label": "a"}], [{"id": "1", "answer": "a"}])
+        self.assertEqual((report["all"]["items"], report["all"]["per_class"]["a"]["recall"],
+                          report["all"]["at_threshold"]["0.5"]["coverage"]), (2, 0.5, 0.5))
+
+    def test_review_flags_are_never_automated(self):
+        answers = [{"id": "1", "answers": {"q": {"type": "noul", "noul": 0.55}}, "review": {"q": ["near 0.5"]}},
+                   {"id": "2", "answers": {"q": {"type": "noul", "noul": 0.97}}, "review": {}}]
+        report = self.score([{"id": "1", "label": True}, {"id": "2", "label": True}], answers)
+        self.assertEqual(report["all"]["at_threshold"]["0.5"]["kept"], 1)
+        self.assertEqual(report["all"]["accuracy"], 1.0)  # booleans and "true" compare equal
+
+    def test_numeric_score_labels_match(self):
+        answers = [{"id": "1", "answers": {"q": {"type": "score", "score": 2, "confidence": 0.9}}}]
+        self.assertEqual(self.score([{"id": "1", "label": 2}], answers)["all"]["accuracy"], 1.0)
+
+    def test_labels_never_reach_the_engine(self):
+        sheet = json.loads((SCRIPTS.parent / "evals/files/search-terms-sheet.json").read_text())
+        self.assertNotIn("label_intent", sheet["fields"]["card"])

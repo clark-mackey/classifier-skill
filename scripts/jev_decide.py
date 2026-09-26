@@ -69,12 +69,21 @@ REDACTIONS = (
 SECRET_KEY = re.compile(rf"(?i)(?:x-)?(?:{SECRET_KEYS})")  # an object field whose whole name is a secret key
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.2"
+CONTRACT_VERSION = "1.3"
 
 
 def fail(message: str, code: int = 2) -> NoReturn:
     print(f"classifier-skill: {message}", file=sys.stderr)
     raise SystemExit(code)
+
+
+class CallError(SystemExit):
+    """A provider request failed after its retries (HTTP error, network, non-JSON reply). Exits 1 if uncaught;
+    catchers print `message`, so a batch can keep the answers it already has."""
+
+    def __init__(self, message: str):
+        super().__init__(1)
+        self.message = message
 
 
 def load_request(path: str) -> dict[str, Any]:
@@ -273,14 +282,14 @@ def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: s
                 time.sleep(retry_delay(exc, RETRY_DELAYS[attempt]))
                 continue
             body = exc.read().decode("utf-8", errors="replace")
-            fail(f"{service} returned HTTP {exc.code}: {body}", code=1)
+            raise CallError(f"{service} returned HTTP {exc.code}: {body}") from exc
         except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
             if retry:
                 time.sleep(RETRY_DELAYS[attempt])
                 continue
-            fail(f"{service} request failed: {exc}", code=1)
+            raise CallError(f"{service} request failed: {exc}") from exc
         except json.JSONDecodeError as exc:
-            fail(f"{service} returned non-JSON: {exc}", code=1)
+            raise CallError(f"{service} returned non-JSON: {exc}") from exc
     raise AssertionError("unreachable")
 
 
@@ -459,12 +468,18 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
     total_cost, flagged, invalid, tokens, models = 0.0, 0, 0, 0, set()
     flags_by_question: dict[str, int] = {}
     started = time.monotonic()
+    stopped: tuple[int, str] | None = None  # (line, reason) when a request fails after its retries
+    done = 0
     for number, state in states:
         payload = {**template, "state": state}
         if args.dry_run:
             record: dict[str, Any] = {"line": number, "payload": payload}
         else:
-            response = call_jev(payload, args.endpoint, args.timeout, args.provider)
+            try:
+                response = call_jev(payload, args.endpoint, args.timeout, args.provider)
+            except CallError as exc:
+                stopped = (number, exc.message)
+                break
             total_cost += float((response.get("usage") or {}).get("cost") or 0)
             tokens += usage_tokens(response)
             models.add(response.get("model"))
@@ -482,10 +497,14 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
                 if args.threshold is not None:
                     record["decisions"] = decisions(response.get("answers"), review, args.threshold)
         print(json.dumps(record, ensure_ascii=False, sort_keys=True), flush=True)
+        done += 1
     if not args.dry_run:
         cost = f"cost ${total_cost:.6f}" if total_cost else "cost not reported by provider"
-        print(f"classifier-skill: {len(states)} states, {flagged} flagged for review, {invalid} invalid, {cost}",
-              file=sys.stderr)
+        print(f"classifier-skill: {len(states)} states, {done} answered, {flagged} flagged for review, "
+              f"{invalid} invalid, {cost}", file=sys.stderr)
+        if stopped:
+            print(f"classifier-skill: stopped at batch line {stopped[0]}; lines from there on were not sent: "
+                  f"{stopped[1]}", file=sys.stderr)
         if flags_by_question:
             per_question = ", ".join(f"{q} {n}" for q, n in sorted(flags_by_question.items()))
             print(f"classifier-skill: flags per question: {per_question}", file=sys.stderr)
@@ -493,7 +512,10 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
             "mode": "batch", "items": len(states), "flagged": flagged, "invalid": invalid,
             "flags_by_question": flags_by_question, "redacted": redacted,
             "input_tokens": tokens, "cost": round(total_cost, 8) or None,
-            "model": sorted(m for m in models if m), "seconds": round(time.monotonic() - started, 2)})
+            "model": sorted(m for m in models if m), "seconds": round(time.monotonic() - started, 2),
+            **({"stopped_at_line": stopped[0], "answered": done} if stopped else {})})
+        if stopped:
+            raise SystemExit(1)
         if invalid:
             raise SystemExit(3)
 
@@ -556,7 +578,10 @@ def main() -> None:
         result = payload
     else:
         started = time.monotonic()
-        result = call_jev(payload, args.endpoint, args.timeout, args.provider)
+        try:
+            result = call_jev(payload, args.endpoint, args.timeout, args.provider)
+        except CallError as exc:
+            fail(exc.message, code=1)
         errors = answer_errors(result.get("answers"), payload["questions"])
         review = {} if errors else review_flags(result.get("answers"), args.margin)
         log_call(args, note, payload, {

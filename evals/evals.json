@@ -241,6 +241,22 @@
         "The held-out set is run once and its accuracy is reported",
         "The Reshape block names the recipe on a Recipe: line"
       ]
+    },
+    {
+      "id": 20,
+      "prompt": "search-terms-labeled.jsonl has 48 search terms for a med spa, and search-terms-sheet.json is the question sheet for them. Use classifier-skill to judge the search intent of every term, then tell me how accurate it was against the label_intent column.",
+      "expected_output": "judge procedure: classify_items.py run with the sheet on the items file, the summary checked, the Classifier count line reported, and score_labels.py used to score intent against label_intent; the labels never sent.",
+      "files": [
+        "files/search-terms-labeled.jsonl",
+        "files/search-terms-sheet.json"
+      ],
+      "assertions": [
+        "classify_items.py is run with --sheet and --items (not a hand-written jev_decide.py batch)",
+        "The summary file is read and its complete flag or counts are checked before results are used",
+        "The reply includes the Classifier: answered/human/unanswered line",
+        "Accuracy is computed by score_labels.py or other code against label_intent, not estimated in prose",
+        "No label_intent value appears in any state sent to the classifier"
+      ]
     }
   ]
 }
