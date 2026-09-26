@@ -607,3 +607,37 @@ class Decisions(unittest.TestCase):
     def test_threshold_out_of_range_exits_2(self):
         request = json.dumps({"state": "x", "questions": {"q": {"type": "noul", "instructions": "x?"}}})
         self.assertEqual(run("jev_decide.py", "--dry-run", "--threshold", "0.3", stdin=request).returncode, 2)
+
+
+class NudgeHook(unittest.TestCase):
+    HOOK = SCRIPTS.parent / "hooks/nudge_classifier.py"
+
+    def fire(self, prompt, tool="Agent", env=None):
+        event = json.dumps({"tool_name": tool, "tool_input": {"prompt": prompt, "subagent_type": "general-purpose"}})
+        result = subprocess.run([sys.executable, str(self.HOOK)], input=event, capture_output=True, text=True,
+                                env={**os.environ, **(env or {})})
+        self.assertEqual(result.returncode, 0)
+        return json.loads(result.stdout)["hookSpecificOutput"]["updatedInput"] if result.stdout else None
+
+    def test_nudges_many_item_judgment_and_keeps_other_fields(self):
+        for prompt in ("Classify each of these 40 search terms as a negative keyword or not.",
+                       "Triage the open PRs into merge-risk tiers:\n1) docs\n2) deps\n3) auth",
+                       "Score every ad against the checklist."):
+            with self.subTest(prompt=prompt):
+                updated = self.fire(prompt, tool="Task")
+                self.assertTrue(updated["prompt"].startswith(prompt))
+                self.assertIn("[classifier-nudge]", updated["prompt"])
+                self.assertEqual(updated["subagent_type"], "general-purpose")
+
+    def test_stays_silent(self):
+        cases = ("Fix the flaky login test.", "Score the page.", "Leaf worker: classify these 40 keywords.",
+                 "Use classifier-skill to sort these 30 pages.", "Rank these 5 pages. [classifier-nudge] already")
+        for prompt in cases:
+            with self.subTest(prompt=prompt):
+                self.assertIsNone(self.fire(prompt))
+        self.assertIsNone(self.fire("Classify these 40 keywords.", tool="Bash"))
+        self.assertIsNone(self.fire("Classify these 40 keywords.", env={"CLASSIFIER_NUDGE": "off"}))
+
+    def test_fails_open_on_bad_input(self):
+        result = subprocess.run([sys.executable, str(self.HOOK)], input="not json", capture_output=True, text=True)
+        self.assertEqual((result.returncode, result.stdout), (0, ""))

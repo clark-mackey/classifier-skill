@@ -36,6 +36,8 @@ Reshape: <original task in one line>
 
 Put the same note in the request as `"reshape": {"task": ..., "recipe": ..., "offloaded": ..., "kept_for_llm": ...}`, where `recipe` is a name from the recipe table below or `custom`; a calling skill adds `"caller": "<its name>"`. The script strips it before sending and records it in the call log.
 
+To have the skill offered when another skill hands per-item judgment to a sub-agent, wire the nudge hook in [references/hooks.md](references/hooks.md).
+
 ## Classify by sorting cards into piles
 
 Cards are the items in `state`; piles are the options. The classifier sorts into piles it is given and never invents one, so decide the piles first — from the user, the domain, or a separate open sort by a person or LLM. Match the sort's shape to question types:

@@ -69,6 +69,8 @@ export OPENROUTER_API_KEY
 
 Start your agent fresh from that environment so it discovers the skill and receives the variable. `agents/openai.yaml` is optional Codex display metadata; other agents ignore it.
 
+Optional: `hooks/nudge_classifier.py` is a Claude Code `PreToolUse` hook that adds a one-line suggestion to a sub-agent's prompt when that sub-agent is about to judge many items, so domain skills that delegate per-item work still get offered the classifier. It calls no model and never blocks. Wiring and measurement are in `references/hooks.md`; it is not enabled by installing the skill.
+
 ## Notes
 
 The OpenRouter Decisions endpoint is alpha; TypeSafe's System One API is the direct route with the same request shape. Returned probabilities describe the classifier's preference among the supplied options. They are not success rates. Data you say must stay on your machine is never sent.
