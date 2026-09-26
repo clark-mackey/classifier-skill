@@ -72,3 +72,15 @@ The deciding test: the answer is one of a finite set you can name in advance, it
 - Inventing categories; an open sort needs a person or LLM to propose piles first.
 - Data that must stay on the machine.
 - A single judgment the working model is already making in passing, where reshaping costs more than it saves.
+
+## Known weak spots (jev-1.13)
+
+From TypeSafe's model-jaggedness notes (checked 2026-09-25). Design around these rather than hoping:
+
+- **Literal reading.** It answers the question as written; say exactly what counts, including the edge cases.
+- **No arithmetic, date math, or counting.** Compute totals, ages, deadlines, and counts in code and put the result in `state`.
+- **Indirection.** "The option described in field B" fails; put the fact itself where the question can see it.
+- **Irrelevant state.** Accuracy falls as unrelated detail grows; filter to the facts the decision needs.
+- **Adversarial content.** State is not treated as hostile by default; label third-party text as data and gate consequential actions in code.
+- **Contradictory criteria or instructions.** Overlapping piles or rules that disagree spread probability; make options mutually exclusive and say what each excludes.
+- **Numeric codes.** Meaningful words beat codes (color names beat hex values; `billing_queue` beats `Q7`).

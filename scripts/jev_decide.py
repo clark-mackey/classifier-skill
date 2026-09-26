@@ -47,9 +47,24 @@ RETRY_STATUSES = {429, 500, 502, 503, 504, 529}  # a classification call has no 
 RETRY_DELAYS = (0.5, 1.0)
 ALLOWED_FIELDS = {"model", "state", "questions", "provider", "trace", "session_id", "user"}
 RESHAPE_FIELDS = {"task", "recipe", "offloaded", "kept_for_llm", "caller"}  # local-only notes, never sent
+# jev-1.13 limits (TypeSafe models page, 2026-09-25): 64k tokens per request, 32k for state plus the longest
+# question. Tokens are estimated at 4 characters each, so a refusal near the limit is approximate.
+MAX_REQUEST_TOKENS, MAX_STATE_QUESTION_TOKENS, CHARS_PER_TOKEN = 64_000, 32_000, 4
+# Secrets scrubbed from state before sending, most specific first. A value is replaced, never the text around it.
+REDACTIONS = (
+    ("private_key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S)),
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}")),
+    ("api_key", re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}")),
+    ("github_token", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})")),
+    ("slack_token", re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}")),
+    ("aws_key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    ("bearer", re.compile(r"(?i)(\bbearer\s+)[A-Za-z0-9._~+/=-]{16,}")),
+    ("secret_value", re.compile(r"(?i)(\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token|token)"
+                                r"[\"']?\s*[:=]\s*[\"']?)[^\s\"',;]{4,}")),
+)
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.1"
+CONTRACT_VERSION = "1.2"
 
 
 def fail(message: str, code: int = 2) -> NoReturn:
@@ -116,6 +131,52 @@ def select_provider(requested: str | None) -> str:
         if not spec.get("explicit") and os.environ.get(spec["key"], "").strip():
             return candidate
     return "openrouter"
+
+
+def redact(value: Any) -> tuple[Any, int]:
+    """Scrub secrets from every string in state; returns the scrubbed copy and how many values were replaced."""
+    if isinstance(value, str):
+        count = 0
+        for kind, pattern in REDACTIONS:
+            value, n = pattern.subn(lambda m: (m.group(1) if m.re.groups else "") + f"[REDACTED:{kind}]", value)
+            count += n
+        return value, count
+    if isinstance(value, list):
+        pairs = [redact(item) for item in value]
+        return [v for v, _ in pairs], sum(n for _, n in pairs)
+    if isinstance(value, dict):
+        pairs = {key: redact(item) for key, item in value.items()}
+        return {k: v for k, (v, _) in pairs.items()}, sum(n for _, n in pairs.values())
+    return value, 0
+
+
+def estimated_tokens(value: Any) -> int:
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    return math.ceil(len(text) / CHARS_PER_TOKEN)
+
+
+def check_size(state: Any, questions: dict[str, Any], where: str = "request") -> None:
+    """Refuse, before sending, a request over jev-1.13's context limits."""
+    question_tokens = [estimated_tokens(q) for q in questions.values()]
+    near = estimated_tokens(state) + max(question_tokens)
+    total = estimated_tokens(state) + sum(question_tokens)
+    if near > MAX_STATE_QUESTION_TOKENS or total > MAX_REQUEST_TOKENS:
+        fail(f"{where} is about {near:,} tokens of state plus its longest question and {total:,} in all; the limits "
+             f"are {MAX_STATE_QUESTION_TOKENS:,} and {MAX_REQUEST_TOKENS:,}. Trim state or split the questions")
+
+
+def decisions(answers: dict[str, Any], review: dict[str, list[str]], threshold: float) -> dict[str, str]:
+    """act / skip / human per question at one threshold; any review reason sends the answer to a person."""
+    out = {}
+    for question_id, answer in (answers or {}).items():
+        if question_id in review:
+            out[question_id] = "human"
+        elif answer.get("type") == "noul":
+            p = answer.get("noul", 0.5)
+            out[question_id] = "act" if p >= threshold else "skip" if p <= 1 - threshold else "human"
+        else:
+            out[question_id] = "act" if (answer.get("confidence") or 0) >= threshold else "human"
+    return out
 
 
 def normalize_request(raw: dict[str, Any], model_override: str | None, batch: bool = False,
@@ -363,7 +424,7 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
         lines = Path(batch_path).expanduser().read_text(encoding="utf-8").splitlines()
     except OSError as exc:
         fail(f"could not read batch file: {exc}")
-    states = []
+    states, redacted = [], 0
     for number, line in enumerate(lines, 1):
         if not line.strip():
             continue
@@ -372,10 +433,16 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
         except json.JSONDecodeError as exc:
             fail(f"batch line {number} is not JSON: {exc}")
         validate_state(state, f"batch line {number}")
+        if not args.no_redact:
+            state, n = redact(state)
+            redacted += n
+        check_size(state, template["questions"], f"batch line {number}")
         states.append((number, state))
     if not states:
         fail("batch file has no states")
 
+    if redacted:
+        print(f"classifier-skill: redacted {redacted} secret value(s) from state before sending", file=sys.stderr)
     total_cost, flagged, invalid, tokens, models = 0.0, 0, 0, 0, set()
     flags_by_question: dict[str, int] = {}
     started = time.monotonic()
@@ -399,6 +466,8 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
                     flags_by_question[question_id] = flags_by_question.get(question_id, 0) + 1
                 record = {"line": number, "state": state, "answers": response.get("answers"),
                           "review": review, "model": response.get("model"), "usage": response.get("usage")}
+                if args.threshold is not None:
+                    record["decisions"] = decisions(response.get("answers"), review, args.threshold)
         print(json.dumps(record, ensure_ascii=False, sort_keys=True), flush=True)
     if not args.dry_run:
         cost = f"cost ${total_cost:.6f}" if total_cost else "cost not reported by provider"
@@ -409,7 +478,7 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
             print(f"classifier-skill: flags per question: {per_question}", file=sys.stderr)
         log_call(args, note or {}, template, {
             "mode": "batch", "items": len(states), "flagged": flagged, "invalid": invalid,
-            "flags_by_question": flags_by_question,
+            "flags_by_question": flags_by_question, "redacted": redacted,
             "input_tokens": tokens, "cost": round(total_cost, 8) or None,
             "model": sorted(m for m in models if m), "seconds": round(time.monotonic() - started, 2)})
         if invalid:
@@ -433,6 +502,10 @@ def main() -> None:
                         help="apply the request (without state) to each JSONL line; one JSON result per line")
     parser.add_argument("--margin", type=float, default=0.2,
                         help="flag a choice for review when the top two probabilities are closer than this")
+    parser.add_argument("--threshold", type=float, metavar="T",
+                        help="add a decisions object: act / skip / human per question at confidence T (0.5-1)")
+    parser.add_argument("--no-redact", action="store_true",
+                        help="send state as given, without scrubbing secrets (tokens, keys, passwords) first")
     parser.add_argument("--contract-version", action="store_true",
                         help="print the caller contract version (references/callers.md) and exit")
     args = parser.parse_args()
@@ -440,6 +513,8 @@ def main() -> None:
         print(CONTRACT_VERSION)
         return
 
+    if args.threshold is not None and not 0.5 <= args.threshold <= 1:
+        fail("--threshold must be between 0.5 and 1")
     args.provider = select_provider(args.provider)
     spec = PROVIDERS[args.provider]
     args.endpoint = args.endpoint or provider_endpoint(args.provider)
@@ -449,6 +524,14 @@ def main() -> None:
     payload = normalize_request(load_request(args.request_file), args.model, batch=bool(args.batch),
                                 default_model=default_model)
     note = take_reshape(payload)
+    redacted = 0
+    if "state" in payload:
+        if not args.no_redact:
+            payload["state"], redacted = redact(payload["state"])
+            if redacted:
+                print(f"classifier-skill: redacted {redacted} secret value(s) from state before sending",
+                      file=sys.stderr)
+        check_size(payload["state"], payload["questions"])
     extras = sorted(set(payload) - spec.get("fields", ALLOWED_FIELDS))
     if extras:
         fail(f"{', '.join(extras)} {'is' if len(extras) == 1 else 'are'} OpenRouter-only; "
@@ -465,6 +548,7 @@ def main() -> None:
         review = {} if errors else review_flags(result.get("answers"), args.margin)
         log_call(args, note, payload, {
             "mode": "single", "items": 1, "flagged": int(bool(review)), "invalid": int(bool(errors)),
+            "redacted": redacted,
             "input_tokens": usage_tokens(result), "cost": (result.get("usage") or {}).get("cost"),
             "model": [result.get("model")], "seconds": round(time.monotonic() - started, 2)})
         if errors:
@@ -472,6 +556,8 @@ def main() -> None:
             sys.stdout.write("\n")
             fail("invalid classifier response; do not act on it", code=3)
         result["review"] = review
+        if args.threshold is not None:
+            result["decisions"] = decisions(result.get("answers"), review, args.threshold)
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2, sort_keys=True)
     sys.stdout.write("\n")
 

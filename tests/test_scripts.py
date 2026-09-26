@@ -547,3 +547,63 @@ class CallerContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Redaction(unittest.TestCase):
+    def test_secrets_replaced_and_ordinary_text_kept(self):
+        module = load_module()
+        state = {"notes": ["token=abcd1234efgh", "key sk-or-v1-0123456789abcdef0123",
+                           "ghp_abcdefghijklmnopqrstuvwxyz0123456789", "Authorization: Bearer abcdefghijklmnop1234",
+                           "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+                           "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----"],
+                 "commit": "3f786850e387550fdab836ed7e6dc881de23001b", "text": "Refund the duplicate charge"}
+        scrubbed, count = module.redact(state)
+        self.assertEqual(count, 6)
+        self.assertEqual(scrubbed["notes"][0], "token=[REDACTED:secret_value]")
+        self.assertNotIn("sk-or-v1", json.dumps(scrubbed))
+        self.assertEqual((scrubbed["commit"], scrubbed["text"]), (state["commit"], state["text"]))
+
+    def test_dry_run_shows_redacted_state_unless_disabled(self):
+        request = json.dumps({"state": "password: hunter2hunter2", "questions": {"q": {"type": "noul", "instructions": "x?"}}})
+        on = run("jev_decide.py", "--dry-run", stdin=request)
+        self.assertEqual(json.loads(on.stdout)["state"], "password: [REDACTED:secret_value]")
+        self.assertIn("redacted 1 secret", on.stderr)
+        off = run("jev_decide.py", "--dry-run", "--no-redact", stdin=request)
+        self.assertEqual(json.loads(off.stdout)["state"], "password: hunter2hunter2")
+
+
+class SizeLimit(unittest.TestCase):
+    QUESTIONS = {"q": {"type": "noul", "instructions": "x?"}}
+
+    def test_oversized_single_request_exits_2(self):
+        result = run("jev_decide.py", "--dry-run", stdin=json.dumps({"state": "a " * 70_000, "questions": self.QUESTIONS}))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("limits", result.stderr)
+        self.assertEqual(run("jev_decide.py", "--dry-run",
+                             stdin=json.dumps({"state": "a " * 1000, "questions": self.QUESTIONS})).returncode, 0)
+
+    def test_oversized_batch_line_refused_before_any_send(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as handle:
+            handle.write('"small"\n' + json.dumps("a " * 70_000) + "\n")
+        try:
+            result = run("jev_decide.py", "--batch", handle.name, stdin=json.dumps({"questions": self.QUESTIONS}),
+                         env={"OPENROUTER_API_KEY": "test-not-a-key"})
+        finally:
+            os.unlink(handle.name)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("batch line 2", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+
+class Decisions(unittest.TestCase):
+    def test_threshold_rule_and_review_override(self):
+        module = load_module()
+        answers = {"yes": {"type": "noul", "noul": 0.9}, "no": {"type": "noul", "noul": 0.05},
+                   "band": {"type": "noul", "noul": 0.7}, "pick": {"type": "choice", "choice": "a", "confidence": 0.9},
+                   "weak": {"type": "score", "score": 1, "confidence": 0.6}, "flagged": {"type": "noul", "noul": 0.99}}
+        self.assertEqual(module.decisions(answers, {"flagged": ["x"]}, 0.85),
+                         {"yes": "act", "no": "skip", "band": "human", "pick": "act", "weak": "human", "flagged": "human"})
+
+    def test_threshold_out_of_range_exits_2(self):
+        request = json.dumps({"state": "x", "questions": {"q": {"type": "noul", "instructions": "x?"}}})
+        self.assertEqual(run("jev_decide.py", "--dry-run", "--threshold", "0.3", stdin=request).returncode, 2)
