@@ -641,3 +641,56 @@ class NudgeHook(unittest.TestCase):
     def test_fails_open_on_bad_input(self):
         result = subprocess.run([sys.executable, str(self.HOOK)], input="not json", capture_output=True, text=True)
         self.assertEqual((result.returncode, result.stdout), (0, ""))
+
+
+class ReviewFixes(unittest.TestCase):
+    """Regression cases from the 2026-09-25 code-owl review of the redaction, size, and nudge changes."""
+
+    def setUp(self):
+        self.module = load_module()
+        spec = importlib.util.spec_from_file_location("nudge", SCRIPTS.parent / "hooks/nudge_classifier.py")
+        self.hook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.hook)
+
+    def test_secret_named_fields_and_quoted_values_are_scrubbed_whole(self):
+        scrubbed, count = self.module.redact({"password": "hunter2hunter2", "Access_Token": "opaquecredential",
+                                              "tokens": 5, "nested": {"client_secret": "abc"}})
+        self.assertEqual(count, 3)
+        self.assertEqual(scrubbed["tokens"], 5)
+        self.assertNotIn("hunter2", json.dumps(scrubbed))
+        self.assertEqual(self.module.redact('password="correct horse battery staple"')[0],
+                         "password=[REDACTED:secret_value]")
+
+    def test_prose_and_url_structure_survive(self):
+        for text in ("The token: limit was reached", "token: identifiers are normalized", "tokens=5000"):
+            self.assertEqual(self.module.redact(text), (text, 0))
+        self.assertEqual(self.module.redact("?token=abc123def456&x=1")[0], "?token=[REDACTED:secret_value]&x=1")
+
+    def test_size_counts_dense_scripts_and_every_payload_field(self):
+        self.assertGreater(self.module.estimated_tokens("界" * 100), 4 * self.module.estimated_tokens("a" * 100))
+        questions = {"q": {"type": "noul", "instructions": "x?"}}
+        with mock.patch.object(sys, "stderr", io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.module.check_size({"state": "界" * 30_000, "questions": questions})
+            with self.assertRaises(SystemExit):
+                self.module.check_size({"state": "x", "questions": questions, "trace": "x" * 300_000})
+            self.module.check_size({"state": "a" * 10_000, "questions": questions})
+
+    def test_nudge_ignores_judging_words_that_are_not_the_task(self):
+        for prompt in ("Refactor the route handlers in these 4 files to use async.",
+                       "Find where the sort comparator is defined across the 12 files in src/.",
+                       "Fix the filter bug. Steps:\n1. read utils.py\n2. add a test\n3. run pytest",
+                       "Add a score column to the leaderboard table and migrate 3 records.",
+                       "Investigate the failure. Filter logs if useful.\n- reproduce it\n- inspect the stack\n- report it",
+                       "Score these 2 pages.",
+                       "Classify each of these 40 items. Do not call any other skills."):
+            with self.subTest(prompt=prompt):
+                self.assertFalse(self.hook.wants_nudge(prompt))
+
+    def test_nudge_covers_check_and_list_introductions(self):
+        for prompt in ("Check each of these 40 findings against the policy.",
+                       "Sort these 30 pages into sections.",
+                       "Classify these:\n- a\n- b\n- c",
+                       "Review this diff and label each finding by severity."):
+            with self.subTest(prompt=prompt):
+                self.assertTrue(self.hook.wants_nudge(prompt))

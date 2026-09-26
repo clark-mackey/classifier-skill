@@ -48,8 +48,10 @@ RETRY_DELAYS = (0.5, 1.0)
 ALLOWED_FIELDS = {"model", "state", "questions", "provider", "trace", "session_id", "user"}
 RESHAPE_FIELDS = {"task", "recipe", "offloaded", "kept_for_llm", "caller"}  # local-only notes, never sent
 # jev-1.13 limits (TypeSafe models page, 2026-09-25): 64k tokens per request, 32k for state plus the longest
-# question. Tokens are estimated at 4 characters each, so a refusal near the limit is approximate.
-MAX_REQUEST_TOKENS, MAX_STATE_QUESTION_TOKENS, CHARS_PER_TOKEN = 64_000, 32_000, 4
+# question. Tokens are estimated (4 ASCII characters each, 1.5 per other character), so a refusal near the limit
+# is approximate.
+MAX_REQUEST_TOKENS, MAX_STATE_QUESTION_TOKENS, CHARS_PER_TOKEN, NON_ASCII_TOKENS_PER_CHAR = 64_000, 32_000, 4, 1.5
+SECRET_KEYS = r"password|passwd|pwd|secret|client[_-]?secret|api[_-]?key|access[_-]?token|auth[_-]?token|token"
 # Secrets scrubbed from state before sending, most specific first. A value is replaced, never the text around it.
 REDACTIONS = (
     ("private_key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S)),
@@ -59,9 +61,12 @@ REDACTIONS = (
     ("slack_token", re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}")),
     ("aws_key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("bearer", re.compile(r"(?i)(\bbearer\s+)[A-Za-z0-9._~+/=-]{16,}")),
-    ("secret_value", re.compile(r"(?i)(\b(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token|token)"
-                                r"[\"']?\s*[:=]\s*[\"']?)[^\s\"',;]{4,}")),
+    # key = value: a quoted value is taken whole; a bare one only when it has a digit or is 16+ characters,
+    # so prose such as "token: limit" is left alone
+    ("secret_value", re.compile(rf"(?i)(\b(?:{SECRET_KEYS})[\"']?\s*[:=]\s*)(?:\"[^\"\n]+\"|'[^'\n]+'|"
+                                r"(?=[^\s\"',;&)]*\d)[^\s\"',;&)]{6,}|[^\s\"',;&)]{16,})")),
 )
+SECRET_KEY = re.compile(rf"(?i)(?:x-)?(?:{SECRET_KEYS})")  # an object field whose whole name is a secret key
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
 CONTRACT_VERSION = "1.2"
@@ -145,21 +150,29 @@ def redact(value: Any) -> tuple[Any, int]:
         pairs = [redact(item) for item in value]
         return [v for v, _ in pairs], sum(n for _, n in pairs)
     if isinstance(value, dict):
-        pairs = {key: redact(item) for key, item in value.items()}
-        return {k: v for k, (v, _) in pairs.items()}, sum(n for _, n in pairs.values())
+        out, count = {}, 0
+        for key, item in value.items():
+            if isinstance(item, str) and item and SECRET_KEY.fullmatch(str(key).strip()):
+                out[key], n = "[REDACTED:secret_value]", 1
+            else:
+                out[key], n = redact(item)
+            count += n
+        return out, count
     return value, 0
 
 
 def estimated_tokens(value: Any) -> int:
-    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-    return math.ceil(len(text) / CHARS_PER_TOKEN)
+    """About 4 ASCII characters per token; other scripts (CJK, emoji) are far denser, so count them heavier."""
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    ascii_chars = sum(ch.isascii() for ch in text)
+    return math.ceil(ascii_chars / CHARS_PER_TOKEN + (len(text) - ascii_chars) * NON_ASCII_TOKENS_PER_CHAR)
 
 
-def check_size(state: Any, questions: dict[str, Any], where: str = "request") -> None:
-    """Refuse, before sending, a request over jev-1.13's context limits."""
-    question_tokens = [estimated_tokens(q) for q in questions.values()]
-    near = estimated_tokens(state) + max(question_tokens)
-    total = estimated_tokens(state) + sum(question_tokens)
+def check_size(payload: dict[str, Any], where: str = "request") -> None:
+    """Refuse, before sending, a request over jev-1.13's context limits. Sizes the payload as it will be sent."""
+    near = max(estimated_tokens({"state": payload["state"], "question": {qid: q}})
+               for qid, q in payload["questions"].items())
+    total = estimated_tokens(payload)
     if near > MAX_STATE_QUESTION_TOKENS or total > MAX_REQUEST_TOKENS:
         fail(f"{where} is about {near:,} tokens of state plus its longest question and {total:,} in all; the limits "
              f"are {MAX_STATE_QUESTION_TOKENS:,} and {MAX_REQUEST_TOKENS:,}. Trim state or split the questions")
@@ -436,7 +449,7 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
         if not args.no_redact:
             state, n = redact(state)
             redacted += n
-        check_size(state, template["questions"], f"batch line {number}")
+        check_size({**template, "state": state}, f"batch line {number}")
         states.append((number, state))
     if not states:
         fail("batch file has no states")
@@ -531,7 +544,7 @@ def main() -> None:
             if redacted:
                 print(f"classifier-skill: redacted {redacted} secret value(s) from state before sending",
                       file=sys.stderr)
-        check_size(payload["state"], payload["questions"])
+        check_size(payload)
     extras = sorted(set(payload) - spec.get("fields", ALLOWED_FIELDS))
     if extras:
         fail(f"{', '.join(extras)} {'is' if len(extras) == 1 else 'are'} OpenRouter-only; "
