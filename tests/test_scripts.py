@@ -818,7 +818,7 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([l["id"] for l in lines], [i["term"] for i in self.ITEMS])
         self.assertTrue(all(l["versions"] == {"sheet": "test-terms@2", "recipe": None, "model": "typesafe/jev-1.13",
-                                              "contract": "1.3"} for l in lines))
+                                              "contract": "1.3", "context": "02f189c76132"} for l in lines))
         self.assertEqual((summary["complete"], summary["items_in"], summary["items_out"], summary["answered"]),
                          (True, 4, 4, 4))
         self.assertIn("Classifier: 4/0/0 (none)", err)
@@ -909,6 +909,14 @@ class ItemsEngine(unittest.TestCase):
     def test_contract_version(self):
         result = run("classify_items.py", "--contract-version")
         self.assertEqual(result.stdout.strip(), "1.3")
+
+    def test_context_file_replaces_sheet_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            context = Path(tmp) / "account.txt"
+            context.write_text("An orthodontist in Leeds.\n")
+            _, lines, _, sent, _ = self.judge(self.ITEMS[:2], [self.answer()] * 2, argv=["--context", str(context)])
+        self.assertEqual(sent[0]["state"]["context"], "An orthodontist in Leeds.")
+        self.assertNotEqual(lines[0]["versions"]["context"], None)
 
     def test_malformed_responses_are_invalid_not_crashes(self):
         extra = self.answer()

@@ -55,7 +55,7 @@ None found: skip your classifier step and say so.
 For many items judged the same way, use `classify_items.py` (same folders as `jev_decide.py`; `$CLASSIFIER_ITEMS_SCRIPT` first) instead of writing the batch yourself. The caller supplies data only.
 
 ```
-python3 <classify_items.py> --sheet SHEET.json --items ITEMS.jsonl --out OUT.jsonl --summary SUMMARY.json [--caller NAME] [--dry-run]
+python3 <classify_items.py> --sheet SHEET.json --items ITEMS.jsonl --out OUT.jsonl --summary SUMMARY.json [--context FILE] [--caller NAME] [--dry-run]
 ```
 
 **Sheet** (JSON):
@@ -67,14 +67,14 @@ python3 <classify_items.py> --sheet SHEET.json --items ITEMS.jsonl --out OUT.jso
 | `data` | yes | `cloud_ok`, or `local_only` (then only a server on this machine is used) |
 | `fields` | yes | `{"id": <item field>, "card": [<item fields sent>]}`; only card fields are sent; `id` defaults to `id` |
 | `questions` and/or `recipe` | one of | questions as in SKILL.md, each with an optional `threshold` (0.5–1, default 0.8); `recipe` names a generic set in `recipes/<name>@<N>.json`, and sheet questions override recipe questions by id |
-| `context` | no | one string of facts sent with every card (e.g. what the business sells) |
+| `context` | no | one string of facts sent with every card (e.g. what the business sells); `--context FILE` replaces it, so one generic sheet serves many accounts |
 | `min_items` | no | default 20; fewer items are not sent (`below_min_items`) |
 | `recurring` | no | `true` runs even one item: a fixed checkpoint kept for consistency, not tokens |
 | `model`, `margin`, `consumes` | no | pinned model; close-runner-up margin (default 0.2); plain words on how your step uses each answer |
 
 **Items:** one JSON object per line. Ids must be unique; a repeat exits 2 before anything is sent.
 
-**Output:** one line per item, in input order, each with `versions` (`sheet`, `recipe`, `model`, `contract`):
+**Output:** one line per item, in input order, each with `versions` (`sheet`, `recipe`, `model`, `contract`, and `context`, a short hash of the context sent):
 - `"status": "answered"` with `answers`, `review`, and `dispositions`: per question `answered`, `skip` (a `noul` confidently false), or `human` (below threshold, a `none_fit` or `insufficient_context` answer, or any review flag).
 - `"status": "unanswered"` with `reason`: `below_min_items` (expected), `no_key`, `refused_host`, `bad_request`, `too_large`, `invalid_answer`, `transport` (a request failed after its retries), or `not_sent` (after a failure, the run stops sending).
 - `"status": "dry_run"` with the `payload`, under `--dry-run`.

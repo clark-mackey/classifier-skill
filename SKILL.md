@@ -68,6 +68,7 @@ If the request matches a row, read that recipe in [references/recipes.md](refere
 | `context-select` | choosing which memories, files, skills, or chunks enter an agent's context |
 | `control-step` | picking each step of a game, simulation, robot, or real-time loop |
 | `calibrate` | tuning a request's criteria and thresholds against labeled examples before relying on it |
+| `catalog-lookup` | the right action depends on what exists in the caller's world (services, pages, owners): ask which entity the item is about, and let code pick the action |
 | `citation-support` | whether a source supports, contradicts, or ignores a claim |
 | `search-intent` | classifying a query, keyword, or page by search intent |
 | `link-target` | picking an internal-link destination from candidates |

@@ -13,6 +13,7 @@ whenever the summary was written, 2 for a bad sheet or items file, so a caller h
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -197,6 +198,9 @@ def main() -> None:
     parser.add_argument("--out", help="output JSONL: one stamped line per item, in input order")
     parser.add_argument("--summary", help="summary JSON, written last")
     parser.add_argument("--caller", help="calling skill's name, for the call log")
+    parser.add_argument("--context", metavar="FILE",
+                        help="text file of facts sent with every card, replacing the sheet's `context` (one generic "
+                             "sheet, one context file per account)")
     parser.add_argument("--provider", choices=sorted(jev.PROVIDERS))
     parser.add_argument("--timeout", type=float, default=30.0, help="seconds per request")
     parser.add_argument("--dry-run", action="store_true", help="write the payloads instead of sending them")
@@ -220,6 +224,13 @@ def main() -> None:
         except OSError as exc:
             jev.fail(f"could not clear old summary {stale}: {exc}")
     sheet, questions, thresholds = load_sheet(args.sheet)
+    if args.context:
+        try:
+            sheet["context"] = Path(args.context).expanduser().read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            jev.fail(f"could not read context file: {exc}")
+        if not sheet["context"]:
+            jev.fail("context file is empty")
     items = load_items(args.items, sheet["fields"])
     args.provider = jev.select_provider(args.provider)
     spec = jev.PROVIDERS[args.provider]
@@ -229,7 +240,8 @@ def main() -> None:
     for field in sorted(set(template) - spec.get("fields", jev.ALLOWED_FIELDS)):
         template.pop(field)
     versions = {"sheet": f"{sheet['sheet']}@{sheet['version']}", "recipe": sheet.get("recipe"),
-                "model": model, "contract": jev.CONTRACT_VERSION}
+                "model": model, "contract": jev.CONTRACT_VERSION,
+                "context": hashlib.sha256(sheet["context"].encode()).hexdigest()[:12] if "context" in sheet else None}
 
     started, run_id = time.monotonic(), uuid.uuid4().hex[:12]
     counts = {"answered": 0, "human": {}, "skip": {}, "unanswered": {}, "written": 0}
