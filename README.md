@@ -77,7 +77,7 @@ The OpenRouter Decisions endpoint is alpha; TypeSafe's System One API is the dir
 
 ## Calling it from another skill
 
-For a list judged the same way every time, write a question sheet (data only: questions or a generic recipe from `recipes/`, the item fields to send, thresholds, the data rule) and run `scripts/classify_items.py`: items in, one stamped line per item out, plus a summary file. `scripts/score_labels.py` scores the answers against labels you hold back, choosing a threshold on one split and reporting it on another. The design is in [docs/caller-integration-plan.md](docs/caller-integration-plan.md).
+For a list judged the same way every time, write a question sheet (data only: questions or a generic recipe from `recipes/`, the item fields to send, thresholds, the data rule) and run `scripts/classify_items.py`: items in, one stamped line per item out, plus a summary file. `scripts/score_labels.py` scores the answers against labels you hold back, choosing a threshold on one split and reporting it on another. How to wire it into a pipeline, and what the backtests taught, is in [docs/calling-from-a-pipeline.md](docs/calling-from-a-pipeline.md).
 
 Other skills can call `scripts/jev_decide.py` or `scripts/classify_items.py` directly. The supported interface (where to find the script, `--contract-version`, exit codes, output shapes, the `caller` field) is in [references/callers.md](references/callers.md); only what it lists is supported, and its major version changes when anything a caller relies on breaks.
 
