@@ -71,6 +71,7 @@ The deciding test: the answer is one of a finite set you can name in advance, it
 - Judgments that need facts not in `state` (the classifier sees nothing else) or specialist knowledge beyond reading the supplied text.
 - Inventing categories; an open sort needs a person or LLM to propose piles first.
 - Data that must stay on the machine.
+- Images, audio, or raw pixels; `state` is text. Describe what code or an LLM extracted from them instead.
 - A single judgment the working model is already making in passing, where reshaping costs more than it saves.
 
 ## Known weak spots (jev-1.13)
