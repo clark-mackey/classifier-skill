@@ -112,7 +112,7 @@ def codex_home(spec, with_skill):
     if with_skill:
         # a real copy, not a symlink, so `find` locates it if the model guesses the wrong path
         shutil.copytree(SKILL, home / "skills/classifier-skill",
-                        ignore=shutil.ignore_patterns(".git", "__pycache__", "evals", "tests"))
+                        ignore=shutil.ignore_patterns(".git", ".codegraph", "__pycache__", "evals", "tests"))
     return home
 
 
