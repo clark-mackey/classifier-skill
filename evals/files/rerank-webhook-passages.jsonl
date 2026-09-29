@@ -1,0 +1,12 @@
+{"id": "p01", "text": "To verify a webhook, compute an HMAC-SHA256 of the raw request body with your endpoint's signing secret and compare it to the Signature header using a constant-time comparison."}
+{"id": "p02", "text": "Signature checks fail when a framework parses the JSON body before you verify it. Verify against the exact raw bytes received, not a re-serialized object."}
+{"id": "p03", "text": "Each endpoint has its own signing secret. Using the secret from a test endpoint against live events makes every signature check fail."}
+{"id": "p04", "text": "Our pricing page lists three plans. The Team plan includes up to ten seats and priority email support."}
+{"id": "p05", "text": "Reverse proxies and load balancers can rewrite or re-encode request bodies, which breaks signature verification downstream. Pass the body through unchanged."}
+{"id": "p06", "text": "Signatures include a timestamp. Requests older than five minutes are rejected to prevent replay, so a server clock that drifts can cause verification to fail."}
+{"id": "p07", "text": "To verify a webhook, calculate an HMAC-SHA256 over the unparsed request body using the endpoint signing secret, then compare it with the Signature header in constant time."}
+{"id": "p08", "text": "You can export invoices as CSV from the Billing tab. Exports include line items and tax totals."}
+{"id": "p09", "text": "Webhook deliveries are retried with exponential backoff for up to three days when your endpoint returns a non-2xx status."}
+{"id": "p10", "text": "Rotating a signing secret keeps the old secret valid for 24 hours, so during rotation you should accept a signature that matches either secret."}
+{"id": "p11", "text": "The dashboard supports dark mode. Toggle it from your profile menu."}
+{"id": "p12", "text": "Webhook events are delivered as JSON with an event type field; subscribe only to the event types your integration handles."}

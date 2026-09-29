@@ -211,7 +211,8 @@
         "A batch call was made with one action choice per note, with no separate needed question",
         "No note is dropped below threshold; uncertain notes become keep_reference",
         "The reply lists the dropped notes",
-        "The Reshape block names the recipe on a Recipe: line"
+        "The Reshape block names the recipe on a Recipe: line",
+        "No score question is used; the load/keep_reference/drop rule is unchanged when no ranking is asked for"
       ]
     },
     {
@@ -256,6 +257,38 @@
         "The reply includes the Classifier: answered/human/unanswered line",
         "Accuracy is computed by score_labels.py or other code against label_intent, not estimated in prose",
         "No label_intent value appears in any state sent to the classifier"
+      ]
+    },
+    {
+      "id": 21,
+      "prompt": "rerank-webhook-passages.jsonl has 12 passages BM25 retrieved for the question 'Why do my webhook requests fail signature verification?'. Use classifier-skill to pick the top 4 to send to the LLM that will write the answer.",
+      "expected_output": "context-select top-k variant: one score question per passage in batch, order computed in code from the expected level over the returned per-level probabilities, top 4 sent, the rest kept as references and reported.",
+      "files": [
+        "files/rerank-webhook-passages.jsonl"
+      ],
+      "assertions": [
+        "recipes.md was read",
+        "A batch call was made with one score question per passage, on a relevance rubric of at least three concrete levels",
+        "Passages are ordered in code by the expected level computed from each answer's per-level probabilities, not by the top level alone and not by confidence",
+        "The off-topic passages (pricing, invoices, dark mode) are not among the 4 sent",
+        "At most one of the near-duplicate passages p01 and p07 is sent, or the reply flags them as duplicates",
+        "Passages not sent are kept as references and listed, not silently dropped",
+        "The Reshape block names the recipe on a Recipe: line"
+      ]
+    },
+    {
+      "id": 22,
+      "prompt": "rerank-sparse-passages.jsonl has 6 passages retrieved for 'Why do webhook signatures stop verifying after I rotate my secret?'. Use classifier-skill to pick the top 5 for the LLM.",
+      "expected_output": "context-select top-k variant with a relevance floor: only passages above the floor are sent, even though fewer than 5 qualify, and the shortfall is reported.",
+      "files": [
+        "files/rerank-sparse-passages.jsonl"
+      ],
+      "assertions": [
+        "A batch call was made with one score question per passage",
+        "The list is not padded to 5: passages below the relevance floor are not sent",
+        "q01 and q05 are the only passages sent, or the reply explains any difference with their expected levels",
+        "The reply reports that fewer than 5 passages cleared the floor",
+        "The reply ends with a Handling: line"
       ]
     }
   ]

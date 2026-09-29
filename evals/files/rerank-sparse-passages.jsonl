@@ -1,0 +1,6 @@
+{"id": "q01", "text": "Rotating a signing secret keeps the old secret valid for 24 hours, so during rotation accept a signature that matches either secret."}
+{"id": "q02", "text": "Our pricing page lists three plans. The Team plan includes up to ten seats and priority email support."}
+{"id": "q03", "text": "The dashboard supports dark mode. Toggle it from your profile menu."}
+{"id": "q04", "text": "You can export invoices as CSV from the Billing tab. Exports include line items and tax totals."}
+{"id": "q05", "text": "Each endpoint has its own signing secret; rotating it from the endpoint settings page issues a new one immediately."}
+{"id": "q06", "text": "Team members can be invited from Settings, then Members. Invitations expire after seven days."}
