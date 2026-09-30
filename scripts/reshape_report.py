@@ -23,6 +23,15 @@ def default_log() -> Path:
     return state_home / "classifier-skill/calls.jsonl"
 
 
+def number(value) -> float:
+    """A log value as a number; older or odd records (a string cost, null) count as 0 rather than crashing the report."""
+    try:
+        value = float(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return int(value) if value.is_integer() else value
+
+
 def load(path: Path, since: str | None) -> list[dict]:
     records = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -30,7 +39,7 @@ def load(path: Path, since: str | None) -> list[dict]:
             record = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not since or record.get("ts", "") >= since:
+        if isinstance(record, dict) and (not since or str(record.get("ts", "")) >= since):
             records.append(record)
     return records
 
@@ -41,9 +50,10 @@ def group(records: list[dict], field: str, missing: str) -> dict[str, dict]:
     for r in records:
         row = rows[r.get(field) or missing]
         row["calls"] += 1
+        row["failed"] += bool(r.get("failed"))
         for key in ("items", "flagged", "invalid", "input_tokens"):
-            row[key] += r.get(key) or 0
-        row["cost"] += r.get("cost") or 0
+            row[key] += number(r.get(key))
+        row["cost"] += number(r.get("cost"))
         row["questions"] += len(r.get("questions") or {})
     return {k: {**v, "cost": round(v["cost"], 6),
                 "flag_rate": round(v["flagged"] / v["items"], 3) if v["items"] else None,
@@ -59,14 +69,15 @@ def summarize(records: list[dict]) -> dict:
         if r.get("task"):
             tasks[r["task"]] += 1
     calls = len(records)
-    items = sum(r.get("items") or 0 for r in records)
+    items = sum(number(r.get("items")) for r in records)
     return {
         "calls": calls,
         "items": items,
         "reshape_noted": sum(bool(r.get("reshape_noted")) for r in records),
-        "flag_rate": round(sum(r.get("flagged") or 0 for r in records) / items, 3) if items else None,
-        "invalid": sum(r.get("invalid") or 0 for r in records),
-        "cost": round(sum(r.get("cost") or 0 for r in records), 6),
+        "failed": sum(bool(r.get("failed")) for r in records),
+        "flag_rate": round(sum(number(r.get("flagged")) for r in records) / items, 3) if items else None,
+        "invalid": sum(number(r.get("invalid")) for r in records),
+        "cost": round(sum(number(r.get("cost")) for r in records), 6),
         "question_types": dict(types),
         "flags_by_question": dict(flags.most_common()),
         "by_recipe": group(records, "recipe", "(custom)"),
@@ -90,16 +101,17 @@ def main() -> None:
         json.dump(summary, sys.stdout, indent=2)
         sys.stdout.write("\n")
         return
-    print(f"{summary['calls']} calls, {summary['items']} items, {summary['reshape_noted']} with a reshape note, "
-          f"flag rate {summary['flag_rate']}, {summary['invalid']} invalid, cost ${summary['cost']}")
+    print(f"{summary['calls']} calls, {summary['items']:g} items, {summary['reshape_noted']} with a reshape note, "
+          f"flag rate {summary['flag_rate']}, {summary['invalid']:g} invalid, {summary['failed']} failed, "
+          f"cost ${summary['cost']}")
     print(f"question types: {summary['question_types']}")
     if summary["flags_by_question"]:
         print(f"flags per question (batch calls): {summary['flags_by_question']}")
     for label, rows in (("recipe", summary["by_recipe"]), ("caller", summary["by_caller"])):
-        print(f"{label:<22}{'calls':>6}{'items':>7}{'q/call':>8}{'flagged':>9}{'rate':>7}{'cost':>11}")
+        print(f"{label:<22}{'calls':>6}{'failed':>7}{'items':>7}{'q/call':>8}{'flagged':>9}{'rate':>7}{'cost':>11}")
         for name, row in rows.items():
-            print(f"{name:<22}{row['calls']:>6}{row['items']:>7}{row['questions_per_call']:>8}"
-                  f"{row['flagged']:>9}{str(row['flag_rate']):>7}{row['cost']:>11.6f}")
+            print(f"{name:<22}{row['calls']:>6}{row['failed']:>7}{row['items']:>7g}{row['questions_per_call']:>8}"
+                  f"{row['flagged']:>9g}{str(row['flag_rate']):>7}{row['cost']:>11.6f}")
     if summary["top_tasks"]:
         print("most frequent reshaped tasks:")
         for task, count in summary["top_tasks"]:

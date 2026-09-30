@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import email.utils
 import hashlib
 import http.client
 import json
@@ -40,7 +41,7 @@ PROVIDERS = {
                    "key_optional": True, "explicit": True, "fields": {"model", "state", "questions"}},
 }
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}  # the only hosts plain http and --local-only accept
-MAX_RETRY_AFTER = 10.0  # seconds; a longer retry-after is reported rather than waited out
+MAX_RETRY_AFTER = 10.0  # seconds; a longer retry-after ends the call with an error instead of being waited out
 FALLBACK_OPTIONS = {"insufficient_context", "insufficient_evidence", "none_fit"}
 MAX_OPTIONS = 250  # larger option sets must be pre-filtered or split in code
 RETRY_STATUSES = {429, 500, 502, 503, 504, 529}  # a classification call has no side effects, so retrying is safe
@@ -69,7 +70,7 @@ REDACTIONS = (
 SECRET_KEY = re.compile(rf"(?i)(?:x-)?(?:{SECRET_KEYS})")  # an object field whose whole name is a secret key
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.4"
+CONTRACT_VERSION = "1.5"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -289,28 +290,43 @@ def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: s
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 return json.load(response)
         except urllib.error.HTTPError as exc:
-            if retry and exc.code in RETRY_STATUSES:
-                time.sleep(retry_delay(exc, RETRY_DELAYS[attempt]))
+            asked = retry_after(exc)
+            if retry and exc.code in RETRY_STATUSES and (asked is None or asked <= MAX_RETRY_AFTER):
+                exc.close()
+                time.sleep(RETRY_DELAYS[attempt] if asked is None else asked)
                 continue
             body = exc.read().decode("utf-8", errors="replace")
-            raise CallError(f"{service} returned HTTP {exc.code}: {body}") from exc
+            exc.close()
+            wait = f" (asked to retry after {asked:.0f}s, longer than the {MAX_RETRY_AFTER:.0f}s this script waits)" \
+                if asked is not None and asked > MAX_RETRY_AFTER and exc.code in RETRY_STATUSES else ""
+            raise CallError(f"{service} returned HTTP {exc.code}{wait}: {body}") from exc
         except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
             if retry:
                 time.sleep(RETRY_DELAYS[attempt])
                 continue
             raise CallError(f"{service} request failed: {exc}") from exc
-        except json.JSONDecodeError as exc:
+        except ValueError as exc:  # JSONDecodeError, or bytes that are not valid text at all
             raise CallError(f"{service} returned non-JSON: {exc}") from exc
     raise AssertionError("unreachable")
 
 
-def retry_delay(exc: urllib.error.HTTPError, default: float) -> float:
-    """Honor a short numeric retry-after header; otherwise use the default backoff."""
+def retry_after(exc: urllib.error.HTTPError) -> float | None:
+    """Seconds the server asked us to wait, from a Retry-After in seconds or as an HTTP date; None when absent or
+    unreadable (then the default backoff applies)."""
+    raw = str((exc.headers or {}).get("retry-after") or "").strip()
+    if not raw:
+        return None
     try:
-        value = float((exc.headers or {}).get("retry-after", ""))
-    except (TypeError, ValueError):
-        return default
-    return value if 0 <= value <= MAX_RETRY_AFTER else default
+        return max(0.0, float(raw))
+    except ValueError:
+        pass
+    try:
+        when = email.utils.parsedate_to_datetime(raw)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    return max(0.0, (when - datetime.datetime.now(datetime.timezone.utc)).total_seconds())
 
 
 def _unit(value: Any) -> bool:
@@ -463,6 +479,12 @@ def log_call(args: argparse.Namespace, note: dict[str, str], template: dict[str,
         print(f"classifier-skill: could not write call log {path}: {exc}", file=sys.stderr)
 
 
+def failure_kind(exc: CallError) -> str:
+    """A short, content-free label for the call log: the HTTP status, or "transport"."""
+    status = getattr(exc.__cause__, "code", None)
+    return f"http_{status}" if isinstance(status, int) else "transport"
+
+
 def usage_tokens(response: dict[str, Any]) -> int:
     usage = response.get("usage") or {}
     try:
@@ -500,7 +522,7 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
     total_cost, flagged, invalid, tokens, models = 0.0, 0, 0, 0, set()
     flags_by_question: dict[str, int] = {}
     started = time.monotonic()
-    stopped: tuple[int, str] | None = None  # (line, reason) when a request fails after its retries
+    stopped: tuple[int, str, str] | None = None  # (line, message, kind) when a request fails after its retries
     done = 0
     for number, state in states:
         payload = {**template, "state": state}
@@ -510,7 +532,7 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
             try:
                 response = call_jev(payload, args.endpoint, args.timeout, args.provider)
             except CallError as exc:
-                stopped = (number, exc.message)
+                stopped = (number, exc.message, failure_kind(exc))
                 break
             errors = response_errors(response, template["questions"])
             if errors:
@@ -546,7 +568,7 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
             "flags_by_question": flags_by_question, "redacted": redacted,
             "input_tokens": tokens, "cost": round(total_cost, 8) or None,
             "model": sorted(m for m in models if m), "seconds": round(time.monotonic() - started, 2),
-            **({"stopped_at_line": stopped[0], "answered": done} if stopped else {})})
+            **({"stopped_at_line": stopped[0], "answered": done, "failed": stopped[2]} if stopped else {})})
         if stopped:
             raise SystemExit(1)
         if invalid:
@@ -614,6 +636,9 @@ def main() -> None:
         try:
             result = call_jev(payload, args.endpoint, args.timeout, args.provider)
         except CallError as exc:
+            log_call(args, note, payload, {  # a failed call is logged too, so the report shows failure rates
+                "mode": "single", "items": 1, "flagged": 0, "invalid": 0, "redacted": redacted,
+                "failed": failure_kind(exc), "seconds": round(time.monotonic() - started, 2)})
             fail(exc.message, code=1)
         errors = response_errors(result, payload["questions"])
         review = {} if errors else review_flags(result.get("answers"), args.margin)

@@ -113,6 +113,10 @@ def main() -> None:
     parser.add_argument("--holdout", type=float, default=0.5, help="share of items held out (with --target)")
     parser.add_argument("--seed", type=int, default=13)
     args = parser.parse_args()
+    if not 0 < args.holdout < 1:
+        parser.error("--holdout must be between 0 and 1 (exclusive): the share of items held out")
+    if args.target is not None and not 0 < args.target <= 1:
+        parser.error("--target must be an accuracy between 0 and 1")
 
     labels = {str(row[args.id_field]): canonical(row[args.label_field]) for row in read_jsonl(args.labels)
               if row.get(args.label_field) not in (None, "")}

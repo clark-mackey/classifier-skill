@@ -752,7 +752,7 @@ def load_engine():
 
 
 class ItemsEngine(unittest.TestCase):
-    """classify_items.py: contract 1.4. Provider replies are recorded shapes, never live calls."""
+    """classify_items.py: contract 1.5. Provider replies are recorded shapes, never live calls."""
 
     SHEET = {"sheet": "test-terms", "version": 2, "contract": "1.3", "data": "cloud_ok", "min_items": 2,
              "fields": {"id": "term", "card": ["term", "campaign"]}, "context": "A dental clinic.",
@@ -821,7 +821,7 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([l["id"] for l in lines], [i["term"] for i in self.ITEMS])
         self.assertTrue(all(l["versions"] == {"sheet": "test-terms@2", "recipe": None, "model": "typesafe/jev-1.13",
-                                              "contract": "1.4", "context": "02f189c76132"} for l in lines))
+                                              "contract": "1.5", "context": "02f189c76132"} for l in lines))
         self.assertEqual((summary["complete"], summary["items_in"], summary["items_out"], summary["answered"]),
                          (True, 4, 4, 4))
         self.assertIn("Classifier: 4/0/0 (none)", err)
@@ -911,7 +911,7 @@ class ItemsEngine(unittest.TestCase):
 
     def test_contract_version(self):
         result = run("classify_items.py", "--contract-version")
-        self.assertEqual(result.stdout.strip(), "1.4")
+        self.assertEqual(result.stdout.strip(), "1.5")
 
     def test_context_file_replaces_sheet_context(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1265,6 +1265,102 @@ class EvalBudget(unittest.TestCase):
                 mock.patch.object(sys, "stdout", io.StringIO()), self.assertRaises(SystemExit) as caught:
             runner.main(["t", "--cases", "1,2", "--models", "gpt-5.6-luna-low", "--budget", "3"])
         self.assertEqual((caught.exception.code, run_case.call_count), (4, 1))
+
+
+
+class RetryAfter(unittest.TestCase):
+    def setUp(self):
+        self.module = load_module()
+
+    def error(self, status=429, retry_after=None):
+        headers = __import__("http.client").client.HTTPMessage()  # case-insensitive, as a real response's are
+        if retry_after is not None:
+            headers["Retry-After"] = retry_after
+        error = self.module.urllib.error.HTTPError("https://openrouter.ai", status, "busy", headers, io.BytesIO(b"slow"))
+        self.addCleanup(error.close)
+        return error
+
+    def test_seconds_and_http_dates_are_read(self):
+        import datetime
+        import email.utils
+        soon = email.utils.format_datetime(datetime.datetime.now(datetime.timezone.utc)
+                                           + datetime.timedelta(seconds=30), usegmt=True)
+        self.assertEqual(self.module.retry_after(self.error(retry_after="3")), 3.0)
+        self.assertAlmostEqual(self.module.retry_after(self.error(retry_after=soon)), 30, delta=2)
+        self.assertEqual(self.module.retry_after(self.error(retry_after="Tue, 01 Jan 2000 00:00:00 GMT")), 0.0)
+        for unreadable in (None, "", "soon"):
+            self.assertIsNone(self.module.retry_after(self.error(retry_after=unreadable)))
+
+    def call(self, *errors):
+        queue, sleeps = list(errors), []
+
+        class Response:
+            def __enter__(self):
+                return io.BytesIO(b'{"answers": {}}')
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(request, timeout):
+            if queue:
+                raise queue.pop(0)
+            return Response()
+
+        with mock.patch.object(self.module.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(self.module.time, "sleep", sleeps.append), \
+                mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-not-a-key"}):
+            result = self.module.call_jev({"model": "m"}, self.module.PROVIDERS["openrouter"]["endpoint"], 5)
+        return result, sleeps
+
+    def test_short_retry_after_is_waited_out(self):
+        result, sleeps = self.call(self.error(retry_after="2"))
+        self.assertEqual((result, sleeps), ({"answers": {}}, [2.0]))
+
+    def test_long_retry_after_fails_at_once_and_names_the_wait(self):
+        with self.assertRaises(self.module.CallError) as caught:
+            self.call(self.error(retry_after="60"))
+        self.assertIn("asked to retry after 60s", caught.exception.message)
+
+
+class FailureLog(unittest.TestCase):
+    def test_failed_single_call_is_logged_without_content(self):
+        provider = FakeProvider([(401, {}, b"bad key")])
+        self.addCleanup(provider.close)
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "calls.jsonl"
+            env = {"CLASSIFIER_COMPATIBLE_URL": provider.url, "CLASSIFIER_COMPATIBLE_MODEL": "m",
+                   "CLASSIFIER_PROVIDER": "", "CLASSIFIER_SKILL_LOG": str(log)}
+            request = {"state": "Ticket: charged twice", "questions": {"q": {"type": "noul", "instructions": "x"}}}
+            result = run("jev_decide.py", "--provider", "compatible", stdin=json.dumps(request), env=env)
+            record = json.loads(log.read_text())
+        self.assertEqual((result.returncode, record["failed"], record["mode"]), (1, "http_401", "single"))
+        self.assertNotIn("charged twice", json.dumps(record))
+
+    def test_report_counts_failures_and_survives_odd_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "calls.jsonl"
+            log.write_text("\n".join([
+                json.dumps({"ts": "2026-09-29T10:00:00+00:00", "items": 3, "flagged": 1, "cost": "0.0002",
+                            "recipe": "routing", "questions": {"q": "choice"}}),
+                json.dumps({"ts": "2026-09-29T11:00:00+00:00", "items": 1, "failed": "http_401", "cost": "n/a"}),
+                "[1, 2]", "not json"]) + "\n")
+            result = run("reshape_report.py", "--log", str(log), "--json")
+            text = run("reshape_report.py", "--log", str(log))
+        report = json.loads(result.stdout)
+        self.assertEqual((report["calls"], report["items"], report["failed"], report["cost"]), (2, 4, 1, 0.0002))
+        self.assertEqual(text.returncode, 0, text.stderr)
+
+
+class ScoreLabelArguments(unittest.TestCase):
+    def test_out_of_range_holdout_or_target_exits_2(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "x.jsonl"
+            path.write_text('{"id": "a", "label": "x"}\n')
+            for extra in (["--holdout", "1.5"], ["--holdout", "0"], ["--holdout", "-0.2"], ["--target", "90"]):
+                with self.subTest(extra=extra):
+                    result = run("score_labels.py", "--answers", str(path), "--labels", str(path), "--question", "q",
+                                 "--target", "0.9", *extra)
+                    self.assertEqual(result.returncode, 2)
 
 
 if __name__ == "__main__":

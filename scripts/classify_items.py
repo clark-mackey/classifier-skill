@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Judge a list of items with a question sheet: items JSONL in, one stamped line per item out, plus a summary.
 
-This is the engine behind the `judge` procedure (SKILL.md) and contract 1.4 (references/callers.md). A caller supplies
+This is the engine behind the `judge` procedure (SKILL.md) and contract 1.5 (references/callers.md). A caller supplies
 data only: a sheet (questions, which item fields go on each card, thresholds, data rule) and the items. Everything else
 stays in here: cards, redaction, size limits, provider choice, retries, answer validation, and dispositions.
 
@@ -329,6 +329,8 @@ def main() -> None:
 
     failed = {r: n for r, n in counts["unanswered"].items() if r not in EXPECTED}
     summary = {
+        # every path through the loop emits exactly one line, so this is a self-check: false only if a future change
+        # drops an item, and a caller must then distrust the output file
         "run_id": run_id, "complete": counts["written"] == len(items), "dry_run": args.dry_run,
         "provider": args.provider, **versions,
         "items_in": len(items), "items_out": counts["written"], "answered": counts["answered"],
