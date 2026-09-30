@@ -2,14 +2,14 @@
 
 An agent skill for asking a non-generative classifier model for a typed answer: pick one option, say yes or no, or place something on a scale. The default classifier is TypeSafe Jev, reached through OpenRouter or TypeSafe's own API. It returns probabilities, not prose, so answers are cheap (about $0.00002 each), quick, and easy to act on in code.
 
-The skill works in any skills-compatible agent and with any working model. It needs Python 3 and network access to OpenRouter or TypeSafe; nothing in it depends on a particular harness.
+The skill works in any skills-compatible agent and with any working model. It needs Python 3 plus either network access to OpenRouter or TypeSafe, or Ollama 0.35+ with a supported local decision model.
 
 > [!WARNING]
-> **This skill sends data to a third-party model.** Every call sends the `state` you supply (item text, facts, summaries) to OpenRouter or TypeSafe, which are cloud services outside your control. Their own retention and logging policies apply.
+> **Hosted providers send data to a third party.** Calls through OpenRouter or TypeSafe send the `state` you supply (item text, facts, summaries) to a cloud service outside your control. Their own retention and logging policies apply. The explicit `ollama` provider stays on loopback.
 >
-> **Do not enable it where data must stay local.** If an environment is supposed to keep all data on the machine or inside your network (client data, personal data, regulated records, secrets), installing this skill there can leak that data. An agent may load the skill on its own when a task looks like classification, and other skills can call its script directly.
+> **Do not expose hosted credentials where every classification must stay local.** An agent may load the skill on its own when a task looks like classification, and other skills can call its script directly. Keep `OPENROUTER_API_KEY` and `TYPESAFE_API_KEY` unset, or block outbound network access, in a strictly local environment.
 >
-> The skill refuses when a request is marked local-only ("local only", "no cloud", "don't send it anywhere"). That refusal depends on the agent following instructions, so it is not a control. To keep data local, do not install the skill or its script. If you have to install it, leave `OPENROUTER_API_KEY` and `TYPESAFE_API_KEY` unset, or block outbound network access. A model served on this machine can take local-only data through `--provider compatible --local-only`, which refuses any endpoint that is not localhost; see `references/providers.md`.
+> The skill refuses cloud providers when a request is marked local-only ("local only", "no cloud", "don't send it anywhere"). For defense in depth, leave hosted keys unset or block outbound network access. Use `--provider ollama` for Ollama System One, or `--provider compatible --local-only` for another local server; both refuse non-loopback destinations. See `references/providers.md`.
 
 ## What you can ask
 
@@ -39,7 +39,7 @@ Prerequisites:
 
 - A skills-compatible agent
 - Python 3 and Git
-- An API key for at least one route to Jev: OpenRouter (`OPENROUTER_API_KEY`, alpha Decisions endpoint) or TypeSafe directly (`TYPESAFE_API_KEY`, from console.typesafe.ai). Both can be set; the skill uses `--provider`, then `CLASSIFIER_PROVIDER`, then whichever key exists, OpenRouter first.
+- One classifier route: an OpenRouter or TypeSafe API key, or Ollama 0.35+ with a supported decision model such as `nimble:9b`. The skill uses `--provider`, then `CLASSIFIER_PROVIDER`, then whichever hosted key exists; local providers are never selected implicitly.
 
 Use the agent skill installer:
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Judge a list of items with a question sheet: items JSONL in, one stamped line per item out, plus a summary.
 
-This is the engine behind the `judge` procedure (SKILL.md) and contract 1.5 (references/callers.md). A caller supplies
+This is the engine behind the `judge` procedure (SKILL.md) and contract 1.6 (references/callers.md). A caller supplies
 data only: a sheet (questions, which item fields go on each card, thresholds, data rule) and the items. Everything else
 stays in here: cards, redaction, size limits, provider choice, retries, answer validation, and dispositions.
 
@@ -202,8 +202,9 @@ def blocked_reason(args: argparse.Namespace, sheet: dict[str, Any]) -> str | Non
     except SystemExit:
         return "refused_host"
     spec = jev.PROVIDERS[args.provider]
-    if not spec.get("key_optional") and not os.environ.get(spec["key"], "").strip():
-        print(f"classifier-skill: {spec['key']} is not set", file=sys.stderr)
+    key_env = spec.get("key")
+    if not spec.get("key_optional") and not os.environ.get(key_env or "", "").strip():
+        print(f"classifier-skill: {key_env} is not set", file=sys.stderr)
         return "no_key"
     return None
 
@@ -259,6 +260,7 @@ def main() -> None:
     args.endpoint = jev.provider_endpoint(args.provider)
     model = sheet_model(sheet, args.provider) or spec.get("model") or os.environ.get(spec.get("model_env", ""), "").strip()
     template = jev.normalize_request({"questions": questions}, None, batch=True, default_model=model)
+    jev.check_provider_limits(template, args.provider)
     for field in sorted(set(template) - spec.get("fields", jev.ALLOWED_FIELDS)):
         template.pop(field)
     versions = {"sheet": f"{sheet['sheet']}@{sheet['version']}", "recipe": sheet.get("recipe"),
@@ -295,6 +297,7 @@ def main() -> None:
             payload = {**template, "state": state}
             try:
                 jev.check_size(payload, f"item {item_id!r}")
+                jev.check_provider_limits(payload, args.provider, f"item {item_id!r}")
             except SystemExit:
                 unanswered(item_id, "too_large")
                 continue

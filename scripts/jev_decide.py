@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Call TypeSafe Jev, through OpenRouter or TypeSafe's own System One API, once or over a JSONL batch of states.
+"""Call a typed decision model through OpenRouter, TypeSafe, Ollama, or a compatible System One API.
 
 Every response is checked against the questions asked before it is printed; a malformed answer exits 3 (or, in
 batch mode, marks that line "invalid") so callers never act on it. Every response also gains a top-level "review"
@@ -33,6 +33,9 @@ PROVIDERS = {
     "typesafe": {"endpoint": "https://api.typesafe.ai/v1/systemone", "host": "api.typesafe.ai",
                  "key": "TYPESAFE_API_KEY", "model": "jev-1.13.0", "name": "TypeSafe",
                  "fields": {"model", "state", "questions"}},  # System One accepts no routing extras
+    "ollama": {"endpoint": "http://127.0.0.1:11434/v1/systemone", "model": "nimble:9b", "name": "Ollama",
+               "key_optional": True, "explicit": True, "loopback_only": True,
+               "fields": {"model", "state", "questions"}},
     # Any server that speaks the same request and answer shapes (references/providers.md): a self-hosted open
     # model, a Hugging Face Inference Endpoint, or another hosted API. Configured by environment, chosen only
     # explicitly, and its optional key is only ever sent to the configured URL's host.
@@ -44,6 +47,8 @@ LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}  # the only hosts plain http 
 MAX_RETRY_AFTER = 10.0  # seconds; a longer retry-after ends the call with an error instead of being waited out
 FALLBACK_OPTIONS = {"insufficient_context", "insufficient_evidence", "none_fit"}
 MAX_OPTIONS = 250  # larger option sets must be pre-filtered or split in code
+OLLAMA_MAX_QUESTIONS, OLLAMA_MAX_OPTIONS, OLLAMA_MAX_BODY_BYTES = 64, 26, 64 * 1024
+NIMBLE_MAX_TOKENS = 8_192
 RETRY_STATUSES = {429, 500, 502, 503, 504, 529}  # a classification call has no side effects, so retrying is safe
 RETRY_DELAYS = (0.5, 1.0)
 ALLOWED_FIELDS = {"model", "state", "questions", "provider", "trace", "session_id", "user"}
@@ -70,7 +75,7 @@ REDACTIONS = (
 SECRET_KEY = re.compile(rf"(?i)(?:x-)?(?:{SECRET_KEYS})")  # an object field whose whole name is a secret key
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.5"
+CONTRACT_VERSION = "1.6"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -130,8 +135,9 @@ def validate_question(question_id: str, question: Any) -> None:
             fail(f"choice question {question_id!r} needs at least two criteria options")
         if len(criteria) > MAX_OPTIONS:
             fail(f"choice question {question_id!r} has {len(criteria)} options; pre-filter or split to {MAX_OPTIONS}")
-        if not all(isinstance(v, str) and v.strip() or isinstance(v, dict) and v for v in criteria.values()):
-            fail(f"choice question {question_id!r} options need a description string or object")
+        if not all(v is None or isinstance(v, str) and v.strip() or isinstance(v, dict) and v
+                   for v in criteria.values()):
+            fail(f"choice question {question_id!r} options need a description string, object, or null")
     elif kind == "score":
         if (not isinstance(criteria, list) or len(criteria) < 2
                 or not all(isinstance(level, str) and level.strip() for level in criteria)):
@@ -199,6 +205,39 @@ def check_size(payload: dict[str, Any], where: str = "request") -> None:
              f"are {MAX_STATE_QUESTION_TOKENS:,} and {MAX_REQUEST_TOKENS:,}. Trim state or split the questions")
 
 
+def check_provider_limits(payload: dict[str, Any], provider: str, where: str = "request") -> None:
+    """Refuse requests that exceed a provider's documented limits before any data is sent."""
+    if provider != "ollama":
+        return
+    questions = payload["questions"]
+    if len(questions) > OLLAMA_MAX_QUESTIONS:
+        fail(f"{where} has {len(questions)} questions; Ollama System One allows {OLLAMA_MAX_QUESTIONS}")
+    for question_id, question in questions.items():
+        if question["type"] in {"choice", "score"} and len(question["criteria"]) > OLLAMA_MAX_OPTIONS:
+            fail(f"{where} question {question_id!r} has {len(question['criteria'])} options; "
+                 f"Ollama System One allows {OLLAMA_MAX_OPTIONS}")
+        if question["type"] == "choice" and not all(
+                description is None or isinstance(description, str)
+                for description in question["criteria"].values()):
+            fail(f"{where} question {question_id!r} has structured choice descriptions; "
+                 "Ollama System One allows only strings or null")
+        if question["type"] == "noul" and question.get("criteria") is not None and not all(
+                isinstance(description, str) for description in question["criteria"].values()):
+            fail(f"{where} question {question_id!r} has structured noul descriptions; "
+                 "Ollama System One allows only strings")
+    if "state" not in payload:
+        return
+    body_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))  # exactly as call_jev sends it
+    if body_bytes > OLLAMA_MAX_BODY_BYTES:
+        fail(f"{where} is {body_bytes:,} bytes; Ollama System One allows {OLLAMA_MAX_BODY_BYTES:,}. "
+             "Trim state or split the questions")
+    if payload.get("model", "").split(":", 1)[0] == "nimble":
+        total = estimated_tokens(payload)
+        if total > NIMBLE_MAX_TOKENS:
+            fail(f"{where} is about {total:,} tokens; Nimble's context limit is {NIMBLE_MAX_TOKENS:,}. "
+                 "Trim state or split the questions")
+
+
 def decisions(answers: dict[str, Any], review: dict[str, list[str]], threshold: float) -> dict[str, str]:
     """act / skip / human per question at one threshold; any review reason sends the answer to a person."""
     out = {}
@@ -256,6 +295,10 @@ def check_endpoint(provider: str, endpoint: str) -> None:
     """Refuse any endpoint off the provider's host. Plain http is allowed only for a server on this machine."""
     spec = PROVIDERS[provider]
     parsed = urlparse(endpoint)
+    if spec.get("loopback_only"):
+        if parsed.scheme not in {"http", "https"} or parsed.hostname not in LOOPBACK_HOSTS:
+            fail(f"refusing Ollama endpoint {endpoint!r}; provider ollama only allows localhost", code=1)
+        return
     host = spec.get("host") or urlparse(provider_endpoint(provider)).hostname
     local_http = parsed.scheme == "http" and parsed.hostname in LOOPBACK_HOSTS and "url_env" in spec
     if parsed.hostname != host or not (parsed.scheme == "https" or local_http):
@@ -270,9 +313,10 @@ def is_local(endpoint: str) -> bool:
 def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: str = "openrouter") -> dict[str, Any]:
     spec = PROVIDERS[provider]
     check_endpoint(provider, endpoint)
-    api_key = os.environ.get(spec["key"], "").strip()
+    key_env = spec.get("key")
+    api_key = os.environ.get(key_env, "").strip() if key_env else ""
     if not api_key and not spec.get("key_optional"):
-        fail(f"{spec['key']} is not available for provider {provider}", code=1)
+        fail(f"{key_env} is not available for provider {provider}", code=1)
     service = spec["name"]
     headers = {"Content-Type": "application/json", "User-Agent": "classifier-skill/1.0"}
     if api_key:
@@ -512,7 +556,9 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
         if not args.no_redact:
             state, n = redact(state)
             redacted += n
-        check_size({**template, "state": state}, f"batch line {number}")
+        item_payload = {**template, "state": state}
+        check_size(item_payload, f"batch line {number}")
+        check_provider_limits(item_payload, args.provider, f"batch line {number}")
         states.append((number, state))
     if not states:
         fail("batch file has no states")
@@ -579,10 +625,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request-file", default="-", help="JSON request file, or - for stdin")
     parser.add_argument("--provider", choices=sorted(PROVIDERS),
-                        help="openrouter, typesafe, or compatible (default: CLASSIFIER_PROVIDER, else whichever "
-                             "Jev API key is set; compatible is never chosen automatically)")
+                        help="openrouter, typesafe, ollama, or compatible (default: CLASSIFIER_PROVIDER, else "
+                             "whichever Jev API key is set; local providers are never chosen automatically)")
     parser.add_argument("--model", help="override the model (default: the provider's pinned Jev version, or "
-                                        "CLASSIFIER_COMPATIBLE_MODEL for compatible)")
+                                        "nimble:9b for Ollama, or CLASSIFIER_COMPATIBLE_MODEL for compatible)")
     parser.add_argument("--local-only", action="store_true",
                         help="refuse to send unless the endpoint is on this machine (localhost)")
     parser.add_argument("--endpoint", help="override the provider's endpoint (must stay on that provider's host)")
@@ -608,6 +654,8 @@ def main() -> None:
     args.provider = select_provider(args.provider)
     spec = PROVIDERS[args.provider]
     args.endpoint = args.endpoint or provider_endpoint(args.provider)
+    if spec.get("loopback_only"):
+        check_endpoint(args.provider, args.endpoint)
     if args.local_only and not is_local(args.endpoint):
         fail(f"--local-only: refusing to send to {args.endpoint!r}, which is not on this machine", code=1)
     default_model = spec.get("model") or os.environ.get(spec.get("model_env", ""), "").strip()
@@ -622,6 +670,7 @@ def main() -> None:
                 print(f"classifier-skill: redacted {redacted} secret value(s) from state before sending",
                       file=sys.stderr)
         check_size(payload)
+    check_provider_limits(payload, args.provider)
     extras = sorted(set(payload) - spec.get("fields", ALLOWED_FIELDS))
     if extras:
         fail(f"{', '.join(extras)} {'is' if len(extras) == 1 else 'are'} OpenRouter-only; "

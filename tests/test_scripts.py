@@ -218,6 +218,7 @@ class Providers(unittest.TestCase):
     def test_default_model_follows_provider(self):
         self.assertEqual(self.dry(), "typesafe/jev-1.13")
         self.assertEqual(self.dry("--provider", "typesafe"), "jev-1.13.0")
+        self.assertEqual(self.dry("--provider", "ollama"), "nimble:9b")
         self.assertEqual(self.dry(env={"TYPESAFE_API_KEY": "k"}), "jev-1.13.0")
         self.assertEqual(self.dry(env={"TYPESAFE_API_KEY": "k", "OPENROUTER_API_KEY": "k"}), "typesafe/jev-1.13")
         self.assertEqual(self.dry(env={"CLASSIFIER_PROVIDER": "typesafe", "OPENROUTER_API_KEY": "k"}), "jev-1.13.0")
@@ -287,6 +288,99 @@ class Providers(unittest.TestCase):
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("--local-only", result.stderr)
         self.assertEqual(self.dry("--provider", "compatible", "--local-only", env=self.COMPATIBLE), "laya-421m")
+
+    def test_ollama_is_loopback_only_even_without_local_only(self):
+        module = load_module()
+        for endpoint in ("http://localhost:11434/v1/systemone", "http://127.0.0.1:11434/v1/systemone"):
+            with self.subTest(endpoint=endpoint):
+                module.check_endpoint("ollama", endpoint)
+        for endpoint in ("https://models.example/v1/systemone", "file:///tmp/systemone"):
+            with self.subTest(endpoint=endpoint), mock.patch.object(sys, "stderr", io.StringIO()), \
+                    self.assertRaises(SystemExit) as caught:
+                module.check_endpoint("ollama", endpoint)
+            self.assertEqual(caught.exception.code, 1)
+        result = run("jev_decide.py", "--dry-run", "--provider", "ollama", "--endpoint",
+                     "https://models.example/v1/systemone", stdin=self.REQUEST)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("only allows localhost", result.stderr)
+
+    def test_ollama_recorded_system_one_response_matches_contract(self):
+        module = load_module()
+        request = {"state": {"ticket": "Charged twice; refund one charge."}, "questions": {
+            "team": {"type": "choice", "instructions": "Which team?", "criteria": {
+                "billing": "Payments", "technical": "Bugs", "other": "Neither"}},
+            "refund": {"type": "noul", "instructions": "Is a refund requested?"},
+            "urgency": {"type": "score", "instructions": "How urgent?",
+                        "criteria": ["Routine", "Soon", "Urgent"]}}}
+        reply = {"model": "nimble:9b", "answers": {
+            "team": {"type": "choice", "choice": "billing", "probabilities": {
+                "billing": 0.984, "technical": 0.011, "other": 0.005}, "confidence": 0.918},
+            "refund": {"type": "noul", "noul": 0.997},
+            "urgency": {"type": "score", "score": 0.693, "legend": {
+                "0": "Routine", "1": "Soon", "2": "Urgent"}, "probabilities": {
+                "0": 0.482, "1": 0.342, "2": 0.175}, "confidence": 0.068}},
+                 "usage": {"input_tokens": 841, "output_tokens": 3}}
+        sent = []
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(req, timeout):
+            sent.append(req)
+            return Response(json.dumps(reply).encode())
+
+        out = io.StringIO()
+        with mock.patch.object(module.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(sys, "argv", ["jev_decide.py", "--provider", "ollama"]), \
+                mock.patch.object(sys, "stdin", io.StringIO(json.dumps(request))), \
+                mock.patch.object(sys, "stdout", out), \
+                mock.patch.dict(os.environ, {"CLASSIFIER_SKILL_LOG": "off"}):
+            module.main()
+        result = json.loads(out.getvalue())
+        self.assertIsNone(sent[0].get_header("Authorization"))
+        self.assertEqual(sent[0].full_url, "http://127.0.0.1:11434/v1/systemone")
+        self.assertEqual(result["usage"], {"input_tokens": 841, "output_tokens": 3})
+        self.assertIn("urgency", result["review"])
+
+    def test_ollama_limits_fail_before_sending(self):
+        cases = (
+            ({"state": "x", "questions": {
+                f"q{n}": {"type": "noul", "instructions": "x?"} for n in range(65)}}, "64"),
+            ({"state": "x", "questions": {"q": {"type": "choice", "instructions": "pick",
+                "criteria": {f"o{n}": "option" for n in range(27)}}}}, "26"),
+            ({"state": "x" * 33_000, "questions": {
+                "q": {"type": "noul", "instructions": "x?"}}}, "8,192"),
+            ({"state": "x" * 66_000, "questions": {
+                "q": {"type": "noul", "instructions": "x?"}}}, "65,536"),
+        )
+        for request, limit in cases:
+            with self.subTest(limit=limit):
+                result = run("jev_decide.py", "--dry-run", "--provider", "ollama", stdin=json.dumps(request))
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(limit, result.stderr)
+
+    def test_ollama_rejects_structured_criteria_before_sending(self):
+        cases = (
+            ({"state": "x", "questions": {"q": {"type": "choice", "instructions": "pick",
+                "criteria": {"a": {"scope": "A"}, "b": "B"}}}}, "choice"),
+            ({"state": "x", "questions": {"q": {"type": "noul", "instructions": "true?",
+                "criteria": {"true": {"scope": "yes"}, "false": "no"}}}}, "noul"),
+        )
+        for request, kind in cases:
+            with self.subTest(kind=kind):
+                result = run("jev_decide.py", "--dry-run", "--provider", "ollama", stdin=json.dumps(request))
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(f"structured {kind} descriptions", result.stderr)
+
+    def test_ollama_accepts_null_choice_descriptions(self):
+        request = {"state": "x", "questions": {"q": {"type": "choice", "instructions": "pick",
+            "criteria": {"a": None, "b": "B"}}}}
+        result = run("jev_decide.py", "--dry-run", "--provider", "ollama", stdin=json.dumps(request))
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_compatible_sends_no_key_when_none_is_set_and_validates_answers(self):
         module = load_module()
@@ -752,7 +846,7 @@ def load_engine():
 
 
 class ItemsEngine(unittest.TestCase):
-    """classify_items.py: contract 1.5. Provider replies are recorded shapes, never live calls."""
+    """classify_items.py: contract 1.6. Provider replies are recorded shapes, never live calls."""
 
     SHEET = {"sheet": "test-terms", "version": 2, "contract": "1.3", "data": "cloud_ok", "min_items": 2,
              "fields": {"id": "term", "card": ["term", "campaign"]}, "context": "A dental clinic.",
@@ -821,7 +915,7 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([l["id"] for l in lines], [i["term"] for i in self.ITEMS])
         self.assertTrue(all(l["versions"] == {"sheet": "test-terms@2", "recipe": None, "model": "typesafe/jev-1.13",
-                                              "contract": "1.5", "context": "02f189c76132"} for l in lines))
+                                              "contract": "1.6", "context": "02f189c76132"} for l in lines))
         self.assertEqual((summary["complete"], summary["items_in"], summary["items_out"], summary["answered"]),
                          (True, 4, 4, 4))
         self.assertIn("Classifier: 4/0/0 (none)", err)
@@ -881,6 +975,24 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual((code, sent), (0, []))
         self.assertEqual(summary["unanswered"], {"refused_host": 4})
 
+    def test_ollama_sheet_needs_no_key_and_uses_default_model(self):
+        _, lines, _, sent, _ = self.judge(
+            self.ITEMS[:2], [self.answer()] * 2,
+            env={"CLASSIFIER_PROVIDER": "ollama", "OPENROUTER_API_KEY": "", "TYPESAFE_API_KEY": ""})
+        self.assertEqual([line["status"] for line in lines], ["answered", "answered"])
+        self.assertTrue(all(payload["model"] == "nimble:9b" for payload in sent))
+        self.assertTrue(all(line["versions"]["model"] == "nimble:9b" for line in lines))
+
+    def test_ollama_sheet_rejects_structured_criteria_before_sending(self):
+        questions = dict(self.SHEET["questions"])
+        questions["pile"] = {**questions["pile"], "criteria": {
+            "keep": {"scope": "k"}, "drop": "d", "none_fit": "neither"}}
+        code, lines, summary, sent, err = self.judge(
+            self.ITEMS[:2], [], sheet={**self.SHEET, "questions": questions},
+            env={"CLASSIFIER_PROVIDER": "ollama", "OPENROUTER_API_KEY": "", "TYPESAFE_API_KEY": ""})
+        self.assertEqual((code, lines, summary, sent), (2, [], None, []))
+        self.assertIn("structured choice descriptions", err)
+
     def test_auth_failure_stops_with_no_key(self):
         module = load_module()
         denied = module.urllib.error.HTTPError("https://openrouter.ai", 401, "no", {}, io.BytesIO(b"bad key"))
@@ -911,7 +1023,7 @@ class ItemsEngine(unittest.TestCase):
 
     def test_contract_version(self):
         result = run("classify_items.py", "--contract-version")
-        self.assertEqual(result.stdout.strip(), "1.5")
+        self.assertEqual(result.stdout.strip(), "1.6")
 
     def test_context_file_replaces_sheet_context(self):
         with tempfile.TemporaryDirectory() as tmp:
