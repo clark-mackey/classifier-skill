@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Judge a list of items with a question sheet: items JSONL in, one stamped line per item out, plus a summary.
 
-This is the engine behind the `judge` procedure (SKILL.md) and contract 1.3 (references/callers.md). A caller supplies
+This is the engine behind the `judge` procedure (SKILL.md) and contract 1.4 (references/callers.md). A caller supplies
 data only: a sheet (questions, which item fields go on each card, thresholds, data rule) and the items. Everything else
 stays in here: cards, redaction, size limits, provider choice, retries, answer validation, and dispositions.
 
@@ -37,6 +37,7 @@ QUESTION_EXTRAS = {"threshold"}  # sheet-only keys stripped before a question is
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 RECIPE_REF = re.compile(r"^([a-z0-9][a-z0-9-]*)@([1-9][0-9]*)$")
 EXPECTED = {"below_min_items"}  # reasons that are a planned bypass, not a degraded run
+ITEM_SCOPED = {"too_large"}  # a failed request that concerns only its own item; the run keeps sending
 AUTH_STATUSES, BAD_REQUEST_STATUSES = {401, 403}, {400, 404, 422}
 
 
@@ -88,6 +89,11 @@ def load_sheet(path: str) -> tuple[dict[str, Any], dict[str, dict[str, Any]], di
     margin = sheet.get("margin", 0.2)
     if type(margin) not in (int, float) or not 0 <= margin <= 1:
         jev.fail("sheet `margin` must be a number from 0 to 1")
+    pinned = sheet.get("model")
+    if pinned is not None and not (isinstance(pinned, str) and pinned.strip() or isinstance(pinned, dict) and pinned
+                                   and all(k in jev.PROVIDERS and isinstance(v, str) and v.strip()
+                                           for k, v in pinned.items())):
+        jev.fail(f"sheet `model` must be a model id or an object of provider -> model id ({', '.join(jev.PROVIDERS)})")
     if "context" in sheet and not (isinstance(sheet["context"], str) and sheet["context"].strip()):
         jev.fail("sheet `context` must be a non-empty string")
 
@@ -116,7 +122,8 @@ def load_sheet(path: str) -> tuple[dict[str, Any], dict[str, dict[str, Any]], di
 
 
 def load_items(path: str, fields: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    """(id, card) per non-blank line. Only the sheet's card fields are kept, so nothing else is ever sent."""
+    """(id, card) per non-blank line. Only the sheet's card fields are kept, so nothing else is ever sent. A card
+    with none of those fields is kept empty and comes out unanswered (`empty_card`) rather than failing the list."""
     id_field = fields.get("id", "id")
     try:
         lines = Path(path).expanduser().read_text(encoding="utf-8").splitlines()
@@ -139,10 +146,7 @@ def load_items(path: str, fields: dict[str, Any]) -> list[tuple[str, dict[str, A
         if item_id in seen:
             jev.fail(f"items line {number} repeats id {item_id!r}; ids must be unique")
         seen.add(item_id)
-        card = {f: item[f] for f in fields["card"] if f in item and item[f] not in (None, "")}
-        if not card:
-            jev.fail(f"items line {number} has none of the card fields {fields['card']}")
-        items.append((item_id, card))
+        items.append((item_id, {f: item[f] for f in fields["card"] if f in item and item[f] not in (None, "")}))
     return items
 
 
@@ -162,6 +166,19 @@ def dispositions(answers: dict[str, Any], review: dict[str, list[str]],
             fallback = answer.get("type") == "choice" and answer.get("choice") in jev.FALLBACK_OPTIONS
             out[qid] = "answered" if confident and not fallback else "human"
     return out
+
+
+def sheet_model(sheet: dict[str, Any], provider: str) -> str | None:
+    """The sheet's pinned model for this provider. Model ids differ by provider, so a pin is either an object keyed by
+    provider or a string, which is an OpenRouter id and applies only there."""
+    pinned = sheet.get("model")
+    if isinstance(pinned, dict):
+        return pinned.get(provider)
+    if pinned and provider != "openrouter":
+        print(f"classifier-skill: sheet model {pinned!r} is an OpenRouter id; using the {provider} default instead "
+              f"(pin per provider with {{\"{provider}\": ...}})", file=sys.stderr)
+        return None
+    return pinned
 
 
 def call_reason(exc: jev.CallError) -> str:
@@ -215,9 +232,14 @@ def main() -> None:
         jev.fail(f"missing --{', --'.join(missing)}")
 
     out_path, summary_path = Path(args.out).expanduser(), Path(args.summary).expanduser()
-    if out_path.resolve() == summary_path.resolve():
-        jev.fail("--out and --summary must be different files")
     partial = summary_path.with_name(summary_path.name + ".tmp")
+    # checked before anything is deleted or opened for writing, so a mistyped path can never destroy an input
+    outputs = [p.resolve() for p in (out_path, summary_path, partial)]
+    inputs = {Path(p).expanduser().resolve() for p in (args.sheet, args.items, args.context) if p}
+    if len(set(outputs)) != len(outputs):
+        jev.fail("--out and --summary must be different files (and --out must not be the summary's .tmp)")
+    if inputs & set(outputs):
+        jev.fail("--out and --summary must not be the sheet, items, or context file")
     for stale in (summary_path, partial):  # a summary left by an earlier run must never describe this one
         try:
             stale.unlink(missing_ok=True)
@@ -235,7 +257,7 @@ def main() -> None:
     args.provider = jev.select_provider(args.provider)
     spec = jev.PROVIDERS[args.provider]
     args.endpoint = jev.provider_endpoint(args.provider)
-    model = sheet.get("model") or spec.get("model") or os.environ.get(spec.get("model_env", ""), "").strip()
+    model = sheet_model(sheet, args.provider) or spec.get("model") or os.environ.get(spec.get("model_env", ""), "").strip()
     template = jev.normalize_request({"questions": questions}, None, batch=True, default_model=model)
     for field in sorted(set(template) - spec.get("fields", jev.ALLOWED_FIELDS)):
         template.pop(field)
@@ -260,8 +282,11 @@ def main() -> None:
             emit({"id": item_id, "status": "unanswered", "reason": reason})
 
         for item_id, card in items:
-            if stopped:  # the run cannot send (bypass, no key, refused host) or a request already failed
-                unanswered(item_id, stopped if stopped != "transport" else "not_sent")
+            if stopped:  # the run cannot send (bypass, no key, refused host) or a run-wide failure already happened
+                unanswered(item_id, stopped)
+                continue
+            if not card:
+                unanswered(item_id, "empty_card")
                 continue
             state = {"context": sheet["context"], "item": card} if "context" in sheet else {"item": card}
             if not args.no_redact:
@@ -282,22 +307,15 @@ def main() -> None:
                 print(f"classifier-skill: item {item_id!r}: {exc.message}", file=sys.stderr)
                 reason = call_reason(exc)
                 unanswered(item_id, reason)
-                stopped = "transport" if reason == "transport" else reason
+                if reason not in ITEM_SCOPED:  # auth, bad request, transport: the rest would fail the same way
+                    stopped = "not_sent"
                 continue
-            answers = response.get("answers") if isinstance(response, dict) else None
-            usage = response.get("usage") if isinstance(response, dict) else None
-            if (not isinstance(response, dict) or not isinstance(usage, (dict, type(None)))
-                    or jev.answer_errors(answers, questions) or set(answers) != set(questions)):
+            if jev.response_errors(response, questions):
                 unanswered(item_id, "invalid_answer")
                 continue
-            try:
-                cost += float((usage or {}).get("cost") or 0)
-            except (TypeError, ValueError):
-                pass  # an unreadable cost is not a reason to drop a valid answer
-            try:
-                tokens += jev.usage_tokens(response)
-            except (TypeError, ValueError):
-                pass
+            answers = response["answers"]
+            cost += jev.response_cost(response)
+            tokens += jev.usage_tokens(response)
             if isinstance(response.get("model"), str):
                 models.add(response["model"])
             review = jev.review_flags(answers, float(sheet.get("margin", 0.2)))

@@ -4,7 +4,7 @@
 Usage: python3 evals/run_evals.py ITERATION [--models gpt-5.6-luna-low] [--cases 1,2] [--variants with_skill,without_skill]
        [--runs 1] [--budget 3] [--timeout 300]
 Defaults keep cost down: with-skill runs only, one run per case, and a spend budget checked against the OpenRouter
-key before each run (CLASSIFIER_EVAL_BUDGET). Baselines are opt-in; with open network they can still reach Jev.
+key before each run (CLASSIFIER_EVAL_BUDGET); a round stops when that check fails. Baselines are opt-in; with open network they can still reach Jev.
 Outputs go to $CLASSIFIER_EVAL_WORKSPACE (default: ../classifier-skill-workspace next to the skill folder); keep them out of git.
 Each run gets an empty working dir and a fresh CODEX_HOME holding only the model's provider config
 (plus a symlink to ~/.codex/auth.json for OpenAI models) and, for with_skill runs, the skill.
@@ -36,26 +36,8 @@ MODELS = {
     "gemini-3.8-flash-or": {"model": "google/gemini-3.8-flash", "config_text": OPENROUTER_CONFIG},
     "gpt-6-luna-or": {"model": "openai/gpt-6-luna", "config_text": OPENROUTER_CONFIG},
 }
-
-parser = argparse.ArgumentParser()
-parser.add_argument("iteration")
-parser.add_argument("--models", default=",".join(MODELS))
-parser.add_argument("--cases", help="comma-separated eval ids (default: all)")
-parser.add_argument("--variants", default="with_skill", help="add without_skill for baselines (costly, often invalid)")
-parser.add_argument("--runs", type=int, default=1, help="runs per case and variant")
-parser.add_argument("--budget", type=float, default=float(os.environ.get("CLASSIFIER_EVAL_BUDGET", "3")),
-                    help="stop before a run once this round's OpenRouter spend reaches this many dollars")
-parser.add_argument("--timeout", type=int, default=300, help="seconds before a run is killed")
-options = parser.parse_args()
-iteration = options.iteration
-MODELS = {label: MODELS[label] for label in options.models.split(",")}
-wanted = {int(i) for i in options.cases.split(",")} if options.cases else None
-cases = [c for c in json.loads((SKILL / "evals/evals.json").read_text())["evals"] if not wanted or c["id"] in wanted]
-# The key given to eval runs: CLASSIFIER_EVAL_KEY, else a macOS keychain entry (CLASSIFIER_EVAL_KEYCHAIN,
-# default openrouter-eval-key). Runs can read it, so keep this a separate key with a low credit limit.
-key = os.environ.get("CLASSIFIER_EVAL_KEY", "").strip() or subprocess.run(
-    ["/usr/bin/security", "find-generic-password", "-s", os.environ.get("CLASSIFIER_EVAL_KEYCHAIN", "openrouter-eval-key"),
-     "-w"], capture_output=True, text=True, check=True).stdout.strip()
+options = iteration = cases = None  # set by main()
+key = ""
 
 
 def key_spend():
@@ -64,7 +46,7 @@ def key_spend():
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             return float(json.load(response)["data"]["usage"])
-    except Exception as exc:  # the guard must never crash the round; it reports and keeps checking
+    except Exception as exc:  # reported, never raised; spend_or_stop turns it into a stop
         print(f"budget check failed: {type(exc).__name__}", flush=True)
         return None
 
@@ -155,20 +137,51 @@ def run_case(label, spec, case, variant, n):
     print(f"{label} eval-{case['id']} {variant} run-{n}: exit {code}, {time.time() - start:.0f}s", flush=True)
 
 
-start_spend = key_spend()
-spent = 0.0
-for label, spec in MODELS.items():
-    for variant in options.variants.split(","):
-        for case in cases:
-            for n in range(1, options.runs + 1):
-                now = key_spend()
-                if start_spend is not None and now is not None:
-                    spent = now - start_spend
+def spend_or_stop():
+    """This key's spend so far, or stop the round: a budget that cannot be checked is not enforced, so no run starts."""
+    value = key_spend()
+    if value is None:
+        print("stopped: could not verify the eval key's spend, so the budget cannot be enforced", flush=True)
+        sys.exit(4)
+    return value
+
+
+def main(argv=None):
+    global options, iteration, MODELS, cases, key
+    parser = argparse.ArgumentParser()
+    parser.add_argument("iteration")
+    parser.add_argument("--models", default=",".join(MODELS))
+    parser.add_argument("--cases", help="comma-separated eval ids (default: all)")
+    parser.add_argument("--variants", default="with_skill", help="add without_skill for baselines (costly, often invalid)")
+    parser.add_argument("--runs", type=int, default=1, help="runs per case and variant")
+    parser.add_argument("--budget", type=float, default=float(os.environ.get("CLASSIFIER_EVAL_BUDGET", "3")),
+                        help="stop before a run once this round's OpenRouter spend reaches this many dollars")
+    parser.add_argument("--timeout", type=int, default=300, help="seconds before a run is killed")
+    options = parser.parse_args(argv)
+    iteration = options.iteration
+    MODELS = {label: MODELS[label] for label in options.models.split(",")}
+    wanted = {int(i) for i in options.cases.split(",")} if options.cases else None
+    cases = [c for c in json.loads((SKILL / "evals/evals.json").read_text())["evals"] if not wanted or c["id"] in wanted]
+    # The key given to eval runs: CLASSIFIER_EVAL_KEY, else a macOS keychain entry (CLASSIFIER_EVAL_KEYCHAIN,
+    # default openrouter-eval-key). Runs can read it, so keep this a separate key with a low credit limit.
+    key = os.environ.get("CLASSIFIER_EVAL_KEY", "").strip() or subprocess.run(
+        ["/usr/bin/security", "find-generic-password", "-s", os.environ.get("CLASSIFIER_EVAL_KEYCHAIN", "openrouter-eval-key"),
+         "-w"], capture_output=True, text=True, check=True).stdout.strip()
+
+    start_spend = spend_or_stop()
+    for label, spec in MODELS.items():
+        for variant in options.variants.split(","):
+            for case in cases:
+                for n in range(1, options.runs + 1):
+                    spent = spend_or_stop() - start_spend
                     if spent >= options.budget:
                         print(f"stopped: ${spent:.2f} spent this round, budget ${options.budget:.2f}", flush=True)
                         sys.exit(4)
-                run_case(label, spec, case, variant, n)
-final = key_spend()
-if start_spend is not None and final is not None:
-    spent = final - start_spend
-print(f"done: ${spent:.2f} spent this round on the eval key", flush=True)
+                    run_case(label, spec, case, variant, n)
+    final = key_spend()
+    spent = f"${final - start_spend:.2f}" if final is not None else "unknown (final check failed)"
+    print(f"done: {spent} spent this round on the eval key", flush=True)
+
+
+if __name__ == "__main__":
+    main()

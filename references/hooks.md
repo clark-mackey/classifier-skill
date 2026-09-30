@@ -8,7 +8,7 @@ Load when wiring the skill into Claude Code so it is offered without the model c
 
 - It calls no model and sends nothing anywhere; it only edits the prompt it is handed.
 - It never blocks and never sets a permission decision. On any error it does nothing.
-- A judging word used elsewhere does not count: "refactor the route handlers in these 4 files", "fix the filter bug" followed by steps, or "add a score column" stay silent, and so does a count under 3 ("score these 2 pages").
+- A judging word used elsewhere does not count: "refactor the route handlers in these 4 files", "fix the filter bug" followed by steps, or "add a score column" stay silent, and so does a count under 3 ("score these 2 pages"). "Check" counts only with "each" or "every" or when it introduces a list, since "check the links" or "check the results" is usually a deterministic check.
 - It stays silent when the prompt already names the classifier, marks a leaf worker that may not call other skills ("leaf worker", `MODEL_WORKER_LEAF`, "do not call any other skills" and similar), or when `CLASSIFIER_NUDGE=off`.
 - The note tells the sub-agent to skip the classifier for open reasoning, writing, or local-only data without a local model, so it does not override this skill's data rules.
 

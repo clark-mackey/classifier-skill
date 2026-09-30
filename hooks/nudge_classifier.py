@@ -24,7 +24,10 @@ NOTE = (f"\n\n{MARKER} This task judges many items the same way. If each judgmen
         "reasoning or writing, or when the data must stay on this machine and no local model is configured.")
 VERB = (r"(?:classif\w*|categori[sz]\w*|tag(?:s|ged|ging)?|triag\w*|sort(?:s|ed|ing)?|bucket\w*|"
         r"scor(?:e|es|ed|ing)|rank(?:s|ed|ing)?|dedup\w*|filter(?:s|ed|ing)?|rout(?:e|es|ed|ing)|"
-        r"label(?:s|ed|led|ing|ling)?|grad(?:e|es|ed|ing)|tier(?:s|ed)?|check(?:s|ed|ing)?)")
+        r"label(?:s|ed|led|ing|ling)?|grad(?:e|es|ed|ing)|tier(?:s|ed)?)")
+# "check" is everyday coding language ("check the links", "check the results"), usually a deterministic check, so it
+# counts only with "each"/"every" or when it introduces a list, never as "check the <items>".
+ANY_VERB = rf"(?:{VERB}|check(?:s|ed|ing)?)"
 NOUNS = (r"items|keywords|terms|queries|pages|urls|links|tickets|emails|messages|prs|pull requests|issues|posts|"
          r"ads|leads|rows|records|files|reviews|comments|cards|results|domains|products|findings|candidates")
 SINGULAR = (r"item|keyword|term|query|page|url|link|ticket|email|message|pr|pull request|issue|post|ad|lead|row|"
@@ -34,9 +37,9 @@ SINGULAR = (r"item|keyword|term|query|page|url|link|ticket|email|message|pr|pull
 # these 4 files", "fix the filter bug") does not count.
 DET = r"(?:(?:each|every|all|of|the|these|those|\d{1,6})\s+){0,4}(?:[\w-]+\s+){0,2}"
 OBJECT = re.compile(rf"\b{VERB}\s+{DET}(?:{NOUNS})\b", re.I)
-EACH_OBJECT = re.compile(rf"\b{VERB}\s+(?:each|every)\s+(?:of\s+(?:the|these|those)\s+)?(?:\d{{1,6}}\s+)?"
+EACH_OBJECT = re.compile(rf"\b{ANY_VERB}\s+(?:each|every)\s+(?:of\s+(?:the|these|those)\s+)?(?:\d{{1,6}}\s+)?"
                          rf"(?:[\w-]+\s+)?(?:{SINGULAR}|{NOUNS})\b", re.I)
-INTRO_LIST = re.compile(rf"\b{VERB}\b[^\n.!?]*:[ \t]*\n(?:[ \t]*(?:\d{{1,4}}[.)]|[-*•])[ \t]+\S[^\n]*(?:\n|$)){{3,}}", re.I)
+INTRO_LIST = re.compile(rf"\b{ANY_VERB}\b[^\n.!?]*:[ \t]*\n(?:[ \t]*(?:\d{{1,4}}[.)]|[-*•])[ \t]+\S[^\n]*(?:\n|$)){{3,}}", re.I)
 SKIP = re.compile(r"classifier-skill|jev_decide|\bjev\b|typesafe|leaf worker|MODEL_WORKER_LEAF|"
                   r"(?:do not|don't|must not|never)\s+(?:call|use|load|invoke)\s+(?:any\s+)?(?:other\s+)?"
                   r"(?:models?|skills?)", re.I)

@@ -1,6 +1,6 @@
 # Calling the classifier from another skill
 
-Contract version **1.3**. This is the interface other skills may rely on; anything not listed here can change without notice. Tests in `tests/test_scripts.py` (`CallerContract`) pin every guarantee below.
+Contract version **1.4**. This is the interface other skills may rely on; anything not listed here can change without notice. Tests in `tests/test_scripts.py` (`CallerContract`) pin every guarantee below.
 
 ## Find the script
 
@@ -14,7 +14,7 @@ None found: skip your classifier step and say so.
 
 ## Check the version
 
-`python3 <script> --contract-version` prints the version (`1.3`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions only add.
+`python3 <script> --contract-version` prints the version (`1.4`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions only add.
 
 ## Call
 
@@ -50,7 +50,7 @@ None found: skip your classifier step and say so.
 
 **Batch:** one JSON line per non-blank input line, in input order (if a request fails after its retries, only the lines before it; see Call), each with `line` (the 1-based input line number) and either `answers` + `review` + `model` + `usage` (+ `decisions` with `--threshold`), or `invalid` (list of reasons). The script exits 3 if any line is invalid. A summary goes to stderr.
 
-## Judge a list (1.3)
+## Judge a list (1.3, reason codes and model pins 1.4)
 
 For many items judged the same way, use `classify_items.py` (same folders as `jev_decide.py`; `$CLASSIFIER_ITEMS_SCRIPT` first) instead of writing the batch yourself. The caller supplies data only.
 
@@ -63,20 +63,21 @@ python3 <classify_items.py> --sheet SHEET.json --items ITEMS.jsonl --out OUT.jso
 | Field | Required | Meaning |
 |---|---|---|
 | `sheet`, `version` | yes | name (lowercase, digits, hyphens) and integer version; a new version for any change to questions, fields, or recipe |
-| `contract` | yes | the contract you wrote for, e.g. `"1.3"`; a different major exits 2 |
+| `contract` | yes | the contract you wrote for, e.g. `"1.4"`; a different major exits 2 |
 | `data` | yes | `cloud_ok`, or `local_only` (then only a server on this machine is used) |
 | `fields` | yes | `{"id": <item field>, "card": [<item fields sent>]}`; only card fields are sent; `id` defaults to `id` |
 | `questions` and/or `recipe` | one of | questions as in SKILL.md, each with an optional `threshold` (0.5–1, default 0.8); `recipe` names a generic set in `recipes/<name>@<N>.json`, and sheet questions override recipe questions by id |
 | `context` | no | one string of facts sent with every card (e.g. what the business sells); `--context FILE` replaces it, so one generic sheet serves many accounts |
 | `min_items` | no | default 20; fewer items are not sent (`below_min_items`) |
 | `recurring` | no | `true` runs even one item: a fixed checkpoint kept for consistency, not tokens |
-| `model`, `margin`, `consumes` | no | pinned model; close-runner-up margin (default 0.2); plain words on how your step uses each answer |
+| `model` | no | pinned model per provider, `{"openrouter": "typesafe/jev-1.13", "typesafe": "jev-1.13.0"}`; a plain string is an OpenRouter id and is ignored, with a warning, on any other provider |
+| `margin`, `consumes` | no | close-runner-up margin (default 0.2); plain words on how your step uses each answer |
 
-**Items:** one JSON object per line. Ids must be unique; a repeat exits 2 before anything is sent.
+**Items:** one JSON object per line. Ids must be unique; a repeat exits 2 before anything is sent. `--out` and `--summary` must differ from each other and from every input file, or the run exits 2 before touching anything.
 
 **Output:** one line per item, in input order, each with `versions` (`sheet`, `recipe`, `model`, `contract`, and `context`, a short hash of the context sent):
 - `"status": "answered"` with `answers`, `review`, and `dispositions`: per question `answered`, `skip` (a `noul` confidently false), or `human` (below threshold, a `none_fit` or `insufficient_context` answer, or any review flag).
-- `"status": "unanswered"` with `reason`: `below_min_items` (expected), `no_key`, `refused_host`, `bad_request`, `too_large`, `invalid_answer`, `transport` (a request failed after its retries), or `not_sent` (after a failure, the run stops sending).
+- `"status": "unanswered"` with `reason`: `below_min_items` (expected), `no_key`, `refused_host`, `bad_request`, `too_large`, `invalid_answer`, `empty_card` (the item has none of the card fields), `transport` (a request failed after its retries), or `not_sent`. `too_large`, `invalid_answer`, and `empty_card` concern one item, and the run goes on; after any other failure it stops sending, and every later item is `not_sent`.
 - `"status": "dry_run"` with the `payload`, under `--dry-run`.
 
 **Summary:** written last, whole or not at all: `complete`, `items_in`, `items_out`, `answered`, `human_by_question`, `skip_by_question`, `unanswered` (reason → count), `bypass`, `degraded` (any failure reason), the versions, `cost`, `seconds`. stderr ends with `Classifier: <answered>/<human>/<unanswered> (<reasons>)`.
@@ -102,6 +103,7 @@ A calling skill may replace this skill's workflow for its own purpose: the Resha
 
 ## Changelog
 
+- **1.4** (2026-09-29): `classify_items.py` keeps going after a one-item failure (`too_large`, `invalid_answer`) and marks items after a run-wide failure `not_sent`; new reason `empty_card` instead of exit 2; sheet `model` may pin per provider; output paths may not overwrite inputs. Redirects are refused (exit 1) so a key never follows one; an answer to a question that was not asked, or a response that is not a JSON object, is invalid (exit 3).
 - **1.3** (2026-09-26): `classify_items.py` judges a list from a data-only sheet (recipes, dispositions, reason codes, summary file); a batch that fails mid-way keeps its printed lines and names where it stopped.
 - **1.2** (2026-09-25): secrets redacted from `state` by default (`--no-redact`); size limit exits 2 before sending; `--threshold` adds `decisions`.
 - **1.1** (2026-09-25): `compatible` provider for any server speaking the same shapes; `--local-only`.

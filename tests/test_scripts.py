@@ -545,9 +545,6 @@ class CallerContract(unittest.TestCase):
         self.assertEqual({k: v["items"] for k, v in summary["by_caller"].items()}, {"code-owl": 3, "(direct)": 2})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class Redaction(unittest.TestCase):
     def test_secrets_replaced_and_ordinary_text_kept(self):
@@ -622,7 +619,9 @@ class NudgeHook(unittest.TestCase):
     def test_nudges_many_item_judgment_and_keeps_other_fields(self):
         for prompt in ("Classify each of these 40 search terms as a negative keyword or not.",
                        "Triage the open PRs into merge-risk tiers:\n1) docs\n2) deps\n3) auth",
-                       "Score every ad against the checklist."):
+                       "Score every ad against the checklist.",
+                       "Check each of these 40 pages for thin content.",
+                       "Check these pages for thin content:\n- /a\n- /b\n- /c"):
             with self.subTest(prompt=prompt):
                 updated = self.fire(prompt, tool="Task")
                 self.assertTrue(updated["prompt"].startswith(prompt))
@@ -631,7 +630,11 @@ class NudgeHook(unittest.TestCase):
 
     def test_stays_silent(self):
         cases = ("Fix the flaky login test.", "Score the page.", "Leaf worker: classify these 40 keywords.",
-                 "Use classifier-skill to sort these 30 pages.", "Rank these 5 pages. [classifier-nudge] already")
+                 "Use classifier-skill to sort these 30 pages.", "Rank these 5 pages. [classifier-nudge] already",
+                 # "check" in everyday coding prompts is usually a deterministic check, not a judgment per item
+                 "Read src/app.py and check the links in the README still resolve.",
+                 "Check the files under scripts/ for unused imports and report file:line.",
+                 "Run the tests and check the results.")
         for prompt in cases:
             with self.subTest(prompt=prompt):
                 self.assertIsNone(self.fire(prompt))
@@ -749,7 +752,7 @@ def load_engine():
 
 
 class ItemsEngine(unittest.TestCase):
-    """classify_items.py: contract 1.3. Provider replies are recorded shapes, never live calls."""
+    """classify_items.py: contract 1.4. Provider replies are recorded shapes, never live calls."""
 
     SHEET = {"sheet": "test-terms", "version": 2, "contract": "1.3", "data": "cloud_ok", "min_items": 2,
              "fields": {"id": "term", "card": ["term", "campaign"]}, "context": "A dental clinic.",
@@ -818,7 +821,7 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([l["id"] for l in lines], [i["term"] for i in self.ITEMS])
         self.assertTrue(all(l["versions"] == {"sheet": "test-terms@2", "recipe": None, "model": "typesafe/jev-1.13",
-                                              "contract": "1.3", "context": "02f189c76132"} for l in lines))
+                                              "contract": "1.4", "context": "02f189c76132"} for l in lines))
         self.assertEqual((summary["complete"], summary["items_in"], summary["items_out"], summary["answered"]),
                          (True, 4, 4, 4))
         self.assertIn("Classifier: 4/0/0 (none)", err)
@@ -882,7 +885,7 @@ class ItemsEngine(unittest.TestCase):
         module = load_module()
         denied = module.urllib.error.HTTPError("https://openrouter.ai", 401, "no", {}, io.BytesIO(b"bad key"))
         _, _, summary, sent, _ = self.judge(self.ITEMS, [denied])
-        self.assertEqual((len(sent), summary["unanswered"]), (1, {"no_key": 4}))
+        self.assertEqual((len(sent), summary["unanswered"]), (1, {"no_key": 1, "not_sent": 3}))
 
     def test_recipe_questions_merge_with_sheet(self):
         sheet = {**self.SHEET, "recipe": "search-intent@1",
@@ -908,7 +911,7 @@ class ItemsEngine(unittest.TestCase):
 
     def test_contract_version(self):
         result = run("classify_items.py", "--contract-version")
-        self.assertEqual(result.stdout.strip(), "1.3")
+        self.assertEqual(result.stdout.strip(), "1.4")
 
     def test_context_file_replaces_sheet_context(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -967,8 +970,10 @@ class ItemsEngine(unittest.TestCase):
     def test_payload_too_large_for_provider(self):
         module = load_module()
         big = module.urllib.error.HTTPError("https://openrouter.ai", 413, "big", {}, io.BytesIO(b"too big"))
-        _, lines, _, _, _ = self.judge(self.ITEMS, [big])
-        self.assertEqual(lines[0]["reason"], "too_large")
+        _, lines, summary, sent, _ = self.judge(self.ITEMS, [big] + [self.answer()] * 3)
+        # one oversized item says nothing about the others, so they are still sent
+        self.assertEqual([l.get("reason") for l in lines], ["too_large", None, None, None])
+        self.assertEqual((len(sent), summary["answered"]), (4, 3))
 
 
 class ScoreLabels(unittest.TestCase):
@@ -1021,3 +1026,246 @@ class ScoreLabels(unittest.TestCase):
     def test_labels_never_reach_the_engine(self):
         sheet = json.loads((SCRIPTS.parent / "evals/files/search-terms-sheet.json").read_text())
         self.assertNotIn("label_intent", sheet["fields"]["card"])
+
+
+
+class FakeProvider:
+    """A local HTTP server that answers each POST with the next queued (status, headers, body) and records requests."""
+
+    def __init__(self, replies):
+        import http.server
+        import threading
+        self.replies, self.requests = list(replies), []
+        owner = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def _reply(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                owner.requests.append({"method": self.command, "path": self.path,
+                                       "authorization": self.headers.get("Authorization"),
+                                       "body": self.rfile.read(length) if length else b""})
+                status, headers, body = owner.replies.pop(0) if owner.replies else (500, {}, b"no reply queued")
+                self.send_response(status)
+                for name, value in headers.items():
+                    self.send_header(name, value)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            do_POST = do_GET = _reply
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/decide"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def call_compatible(provider, request, *args):
+    env = {"CLASSIFIER_COMPATIBLE_URL": provider.url, "CLASSIFIER_COMPATIBLE_KEY": "sk-test-secret-value",
+           "CLASSIFIER_COMPATIBLE_MODEL": "test-model", "CLASSIFIER_PROVIDER": ""}
+    return run("jev_decide.py", "--provider", "compatible", *args, stdin=json.dumps(request), env=env)
+
+
+class ResponseGate(unittest.TestCase):
+    """Redirects, non-object replies, and unasked answers never reach a caller as usable answers."""
+
+    QUESTION = {"q": {"type": "noul", "instructions": "Refund?"}}
+    GOOD = {"model": "test-model", "answers": {"q": {"type": "noul", "noul": 0.97}}}
+
+    def serve(self, *replies):
+        provider = FakeProvider(replies)
+        self.addCleanup(provider.close)
+        return provider
+
+    def test_redirect_is_refused_and_the_key_never_follows(self):
+        target = self.serve((200, {}, json.dumps(self.GOOD).encode()))
+        origin = self.serve((302, {"Location": target.url}, b""))
+        result = call_compatible(origin, {"state": "Ticket: charged twice", "questions": self.QUESTION})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("HTTP 302", result.stderr)
+        self.assertEqual(target.requests, [])  # the redirect target saw nothing, so no Authorization header
+        self.assertEqual(len(origin.requests), 1)  # a redirect is not retried
+
+    def test_non_object_reply_is_invalid_not_a_crash(self):
+        for body in (b"[]", b"null", b'"busy"'):
+            with self.subTest(body=body):
+                provider = self.serve((200, {}, body))
+                result = call_compatible(provider, {"state": "Ticket: charged twice", "questions": self.QUESTION})
+                self.assertEqual(result.returncode, 3, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertIn("not a JSON object", result.stdout)
+
+    def test_unasked_answer_is_invalid_and_gets_no_decision(self):
+        extra = {**self.GOOD, "answers": {**self.GOOD["answers"], "delete_account": {"type": "noul", "noul": 0.99}}}
+        provider = self.serve((200, {}, json.dumps(extra).encode()))
+        result = call_compatible(provider, {"state": "Ticket: charged twice", "questions": self.QUESTION},
+                                 "--threshold", "0.9")
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("delete_account: answer to a question that was not asked", result.stdout)
+        self.assertNotIn("decisions", json.loads(result.stdout))
+
+    def test_batch_marks_bad_replies_invalid_and_keeps_going(self):
+        provider = self.serve((200, {}, b"[]"), (200, {}, json.dumps(self.GOOD).encode()),
+                              (200, {}, json.dumps({**self.GOOD, "usage": "free"}).encode()))
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as handle:
+            handle.write('"Ticket one"\n"Ticket two"\n"Ticket three"\n')
+        self.addCleanup(os.unlink, handle.name)
+        result = call_compatible(provider, {"questions": self.QUESTION}, "--batch", handle.name)
+        lines = [json.loads(line) for line in result.stdout.splitlines()]
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(["invalid" in line for line in lines], [True, False, True])
+        self.assertNotIn("Traceback", result.stderr)
+
+
+class EngineFailures(unittest.TestCase):
+    """classify_items.py: one item's failure stays with that item; a run-wide failure marks the rest not_sent."""
+
+    SHEET, ITEMS, judge, answer = ItemsEngine.SHEET, ItemsEngine.ITEMS, ItemsEngine.judge, staticmethod(ItemsEngine.answer)
+
+    def test_bad_request_stops_and_marks_the_rest_not_sent(self):
+        module = load_module()
+        bad = module.urllib.error.HTTPError("https://openrouter.ai", 400, "bad", {}, io.BytesIO(b"bad request"))
+        _, lines, summary, sent, _ = self.judge(self.ITEMS, [bad])
+        self.assertEqual([l.get("reason") for l in lines], ["bad_request", "not_sent", "not_sent", "not_sent"])
+        self.assertEqual((len(sent), summary["unanswered"]), (1, {"bad_request": 1, "not_sent": 3}))
+
+    def test_empty_card_is_unanswered_not_a_failed_run(self):
+        items = self.ITEMS[:2] + [{"term": "term 9", "campaign": None}] + self.ITEMS[2:]
+        sheet = {**self.SHEET, "fields": {"id": "term", "card": ["campaign"]}}
+        code, lines, summary, sent, _ = self.judge(items, [self.answer()] * 4, sheet=sheet)
+        self.assertEqual(code, 0)
+        self.assertEqual([l.get("reason") for l in lines], [None, None, "empty_card", None, None])
+        self.assertEqual((len(sent), summary["answered"], summary["unanswered"]), (4, 4, {"empty_card": 1}))
+
+    def test_model_pin_follows_the_provider(self):
+        pins = {"openrouter": "typesafe/jev-1.13", "typesafe": "jev-1.13.0"}
+        env = {"TYPESAFE_API_KEY": "test-not-a-key"}
+        _, _, summary, sent, _ = self.judge(self.ITEMS, [self.answer()] * 4, sheet={**self.SHEET, "model": pins},
+                                            env=env, argv=["--provider", "typesafe"])
+        self.assertEqual({p["model"] for p in sent}, {"jev-1.13.0"})
+        self.assertEqual(summary["model"], "jev-1.13.0")
+        _, _, _, sent, err = self.judge(self.ITEMS, [self.answer()] * 4,
+                                        sheet={**self.SHEET, "model": "typesafe/jev-1.13"}, env=env,
+                                        argv=["--provider", "typesafe"])
+        self.assertEqual({p["model"] for p in sent}, {"jev-1.13.0"})  # an OpenRouter id is never sent to TypeSafe
+        self.assertIn("is an OpenRouter id", err)
+
+    def test_bad_model_pin_exits_2(self):
+        for pin in ({"nowhere": "x"}, {"typesafe": ""}, 7, {}):
+            with self.subTest(pin=pin):
+                code, _, _, sent, _ = self.judge(self.ITEMS, [], sheet={**self.SHEET, "model": pin})
+                self.assertEqual((code, sent), (2, []))
+
+
+class EnginePaths(unittest.TestCase):
+    """classify_items.py refuses output paths that would delete or overwrite an input, before touching anything."""
+
+    def run_engine(self, tmp, out, summary):
+        sheet, items = Path(tmp) / "sheet.json", Path(tmp) / "items.jsonl"
+        sheet.write_text(json.dumps(ItemsEngine.SHEET))
+        items.write_text("".join(json.dumps(i) + "\n" for i in ItemsEngine.ITEMS))
+        named = {"sheet": sheet, "items": items, "out": Path(tmp) / "out.jsonl", "summary": Path(tmp) / "s.json"}
+        named["tmp"] = Path(str(named["summary"]) + ".tmp")
+        result = run("classify_items.py", "--sheet", str(sheet), "--items", str(items),
+                     "--out", str(named[out]), "--summary", str(named[summary]), "--dry-run")
+        return result, sheet.read_text(), items.read_text()
+
+    def test_outputs_never_overwrite_inputs(self):
+        for out, summary in (("out", "items"), ("items", "summary"), ("sheet", "summary"), ("out", "sheet"),
+                             ("tmp", "summary"), ("out", "out")):
+            with self.subTest(out=out, summary=summary), tempfile.TemporaryDirectory() as tmp:
+                result, sheet_text, items_text = self.run_engine(tmp, out, summary)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(json.loads(sheet_text), ItemsEngine.SHEET)
+                self.assertEqual(len(items_text.splitlines()), len(ItemsEngine.ITEMS))
+
+    def test_distinct_paths_still_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result, _, _ = self.run_engine(tmp, "out", "summary")
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class ScoreAnswers(unittest.TestCase):
+    def test_score_is_scored_by_most_likely_level_not_expected_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            labels, answers = Path(tmp) / "labels.jsonl", Path(tmp) / "answers.jsonl"
+            labels.write_text('{"id": "a", "label": 2}\n{"id": "b", "label": 0}\n')
+            answers.write_text("".join(json.dumps(line) + "\n" for line in (
+                {"id": "a", "answers": {"r": {"type": "score", "score": 1.98, "confidence": 0.97,
+                                              "probabilities": {"0": 0, "1": 0.02, "2": 0.98}}}, "review": {}},
+                {"id": "b", "answers": {"r": {"type": "score", "score": 0.03, "confidence": 0.97,
+                                              "probabilities": {"0": 0.97, "1": 0.03, "2": 0}}}, "review": {}})))
+            result = run("score_labels.py", "--answers", str(answers), "--labels", str(labels), "--question", "r")
+        report = json.loads(result.stdout)["all"]
+        self.assertEqual((report["accuracy"], report["confusion"]), (1.0, {"0": {"0": 1}, "2": {"2": 1}}))
+
+
+def load_eval(name):
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS.parent / "evals" / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class EvalGrader(unittest.TestCase):
+    def grade(self, commands, log_lines=(), tail=""):
+        grader = load_eval("grade_evals")
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            events = [json.dumps({"item": {"type": "command_execution", "command": c}}) for c in commands]
+            (run_dir / "events.jsonl").write_text("\n".join(events) + "\n" + tail)
+            (run_dir / "timing.json").write_text('{"seconds": 1}')
+            if log_lines:
+                (run_dir / "tmp").mkdir()
+                (run_dir / "tmp/calls.jsonl").write_text("\n".join(log_lines) + "\n")
+            return grader.facts(run_dir)
+
+    def test_reading_the_script_is_not_a_live_call(self):
+        facts = self.grade(["sed -n 1,80p ~/skills/classifier-skill/scripts/jev_decide.py",
+                            "python3 scripts/jev_decide.py --contract-version",
+                            "python3 scripts/jev_decide.py --help"])
+        self.assertFalse(facts["jev_live_call"])
+        self.assertTrue(facts["script_source_read"])
+
+    def test_engine_runs_and_logged_calls_count(self):
+        facts = self.grade(["python3 /h/skills/classifier-skill/scripts/classify_items.py --sheet s --items i"])
+        self.assertTrue(facts["jev_live_call"] and facts["batch_used"])
+        self.assertTrue(self.grade([], log_lines=['{"items": 3}'])["jev_live_call"])
+        self.assertFalse(self.grade(["python3 scripts/jev_decide.py --dry-run"])["jev_live_call"])
+
+    def test_truncated_lines_are_skipped(self):
+        facts = self.grade(["python3 scripts/jev_decide.py --batch b.jsonl"], log_lines=['{"items": 2}', '{"ite'],
+                           tail='{"item": {"type": "agent_mess')
+        self.assertEqual((facts["jev_live_call"], facts["log_calls"], facts["log_items"]), (True, 1, 2))
+
+
+class EvalBudget(unittest.TestCase):
+    def test_unverifiable_spend_stops_before_any_run(self):
+        runner = load_eval("run_evals")
+        with mock.patch.object(runner, "key_spend", return_value=None), \
+                mock.patch.object(runner, "run_case") as run_case, \
+                mock.patch.dict(os.environ, {"CLASSIFIER_EVAL_KEY": "test-not-a-key"}), \
+                mock.patch.object(sys, "stdout", io.StringIO()), self.assertRaises(SystemExit) as caught:
+            runner.main(["t", "--cases", "1"])
+        self.assertEqual(caught.exception.code, 4)
+        run_case.assert_not_called()
+
+    def test_budget_reached_stops_before_the_next_run(self):
+        runner = load_eval("run_evals")
+        spend = iter([0.0, 0.0, 5.0])
+        with mock.patch.object(runner, "key_spend", side_effect=lambda: next(spend)), \
+                mock.patch.object(runner, "run_case") as run_case, \
+                mock.patch.dict(os.environ, {"CLASSIFIER_EVAL_KEY": "test-not-a-key"}), \
+                mock.patch.object(sys, "stdout", io.StringIO()), self.assertRaises(SystemExit) as caught:
+            runner.main(["t", "--cases", "1,2", "--models", "gpt-5.6-luna-low", "--budget", "3"])
+        self.assertEqual((caught.exception.code, run_case.call_count), (4, 1))
+
+
+if __name__ == "__main__":
+    unittest.main()

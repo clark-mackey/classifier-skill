@@ -3,7 +3,8 @@
 
 Answers come from a classify_items.py output file, or from any JSONL of {"id", "answer"} lines (for example a blind LLM
 arm, whose answers count as fully confident). Labels are a JSONL file with an id field and a label field; they never go
-to the classifier. With --target, a threshold is chosen on a tuning split and reported once on the held-out split, so
+to the classifier. A `score` question's label is the 0-based index of its rubric level (0 = lowest), compared with the
+most likely level, not with the continuous `score`. With --target, a threshold is chosen on a tuning split and reported once on the held-out split, so
 the reported accuracy is not the one the threshold was tuned on (the `calibrate` recipe). Prints one JSON report."""
 
 from __future__ import annotations
@@ -50,8 +51,14 @@ def picks(lines: list[dict[str, Any]], question: str) -> dict[str, tuple[str | N
             if answer.get("type") == "noul":
                 p = answer.get("noul", 0.5)
                 pick, confidence = canonical(p >= 0.5), max(p, 1 - p)
+            elif answer.get("type") == "score":
+                # `score` is the expected level (1.98), never a label; the pick is the most likely level's index
+                probabilities, level = answer.get("probabilities") or {}, answer.get("score")
+                pick = (max(probabilities, key=probabilities.get) if probabilities
+                        else canonical(round(level)) if isinstance(level, (int, float)) else None)
+                confidence = answer.get("confidence") or 0
             else:
-                pick, confidence = canonical(answer.get("choice", answer.get("score"))), answer.get("confidence") or 0
+                pick, confidence = canonical(answer.get("choice")), answer.get("confidence") or 0
             out[item_id] = (pick, 0.0 if (line.get("review") or {}).get(question) else confidence)
         elif "answer" in line:
             out[item_id] = (canonical(line["answer"]), 1.0)

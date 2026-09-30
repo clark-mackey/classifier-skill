@@ -69,7 +69,18 @@ REDACTIONS = (
 SECRET_KEY = re.compile(rf"(?i)(?:x-)?(?:{SECRET_KEYS})")  # an object field whose whole name is a secret key
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.3"
+CONTRACT_VERSION = "1.4"
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A decision API never redirects. Following one would re-send the Authorization header to whatever host the
+    redirect names, so a 3xx surfaces as an HTTP error instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+urllib.request.install_opener(urllib.request.build_opener(NoRedirect))
 
 
 def fail(message: str, code: int = 2) -> NoReturn:
@@ -315,7 +326,8 @@ def answer_errors(answers: Any, questions: dict[str, Any]) -> list[str]:
     """Structural problems that make a response unsafe to act on. Empty means every asked question is well formed."""
     if not isinstance(answers, dict):
         return ["response has no answers object"]
-    errors = []
+    errors = [f"{question_id}: answer to a question that was not asked"
+              for question_id in sorted(set(answers) - set(questions))]
     for question_id, question in questions.items():
         answer, kind = answers.get(question_id), question["type"]
         if not isinstance(answer, dict) or answer.get("type") != kind:
@@ -336,6 +348,23 @@ def answer_errors(answers: Any, questions: dict[str, Any]) -> list[str]:
                     or not _unit(answer.get("confidence"))):
                 errors.append(f"{question_id}: score answer is outside the rubric")
     return errors
+
+
+def response_errors(response: Any, questions: dict[str, Any]) -> list[str]:
+    """The one gate every caller uses before touching a response: its shape, its usage, and its answers."""
+    if not isinstance(response, dict):
+        return ["response is not a JSON object"]
+    if not isinstance(response.get("usage"), (dict, type(None))):
+        return ["response usage is not an object"]
+    return answer_errors(response.get("answers"), questions)
+
+
+def response_cost(response: dict[str, Any]) -> float:
+    """The reported cost in dollars; 0 when absent or unreadable (an odd cost is not a reason to drop an answer)."""
+    try:
+        return float((response.get("usage") or {}).get("cost") or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def review_flags(answers: dict[str, Any], margin: float) -> dict[str, list[str]]:
@@ -436,7 +465,10 @@ def log_call(args: argparse.Namespace, note: dict[str, str], template: dict[str,
 
 def usage_tokens(response: dict[str, Any]) -> int:
     usage = response.get("usage") or {}
-    return int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+    try:
+        return int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespace,
@@ -480,14 +512,15 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
             except CallError as exc:
                 stopped = (number, exc.message)
                 break
-            total_cost += float((response.get("usage") or {}).get("cost") or 0)
-            tokens += usage_tokens(response)
-            models.add(response.get("model"))
-            errors = answer_errors(response.get("answers"), template["questions"])
+            errors = response_errors(response, template["questions"])
             if errors:
                 invalid += 1
-                record = {"line": number, "state": state, "invalid": errors, "model": response.get("model")}
+                record = {"line": number, "state": state, "invalid": errors,
+                          "model": response.get("model") if isinstance(response, dict) else None}
             else:
+                total_cost += response_cost(response)
+                tokens += usage_tokens(response)
+                models.add(response.get("model"))
                 review = review_flags(response.get("answers"), args.margin)
                 flagged += bool(review)
                 for question_id in review:
@@ -582,13 +615,13 @@ def main() -> None:
             result = call_jev(payload, args.endpoint, args.timeout, args.provider)
         except CallError as exc:
             fail(exc.message, code=1)
-        errors = answer_errors(result.get("answers"), payload["questions"])
+        errors = response_errors(result, payload["questions"])
         review = {} if errors else review_flags(result.get("answers"), args.margin)
         log_call(args, note, payload, {
             "mode": "single", "items": 1, "flagged": int(bool(review)), "invalid": int(bool(errors)),
             "redacted": redacted,
-            "input_tokens": usage_tokens(result), "cost": (result.get("usage") or {}).get("cost"),
-            "model": [result.get("model")], "seconds": round(time.monotonic() - started, 2)})
+            "input_tokens": 0 if errors else usage_tokens(result), "cost": None if errors else response_cost(result) or None,
+            "model": [result.get("model")] if isinstance(result, dict) else [], "seconds": round(time.monotonic() - started, 2)})
         if errors:
             json.dump({"invalid": errors, "response": result}, sys.stdout, ensure_ascii=False, indent=2)
             sys.stdout.write("\n")
