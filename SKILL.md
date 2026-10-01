@@ -62,7 +62,7 @@ If the request matches a row, read that recipe in [references/recipes.md](refere
 | Recipe | Use when the request involves |
 |---|---|
 | `card-sort` | sorting any set of items into piles you define (content, tickets, objects, requirements, ideas) |
-| `routing` | sending a ticket, lead, or message to a team |
+| `routing` | sending a ticket, lead, or message to a team, or choosing an app or function from supplied candidates |
 | `model-choice` | picking a model, profile, or effort level from candidates the user or caller supplies |
 | `action-gate` | approving, confirming, or blocking a proposed agent action before it runs |
 | `context-select` | choosing which memories, files, skills, or chunks enter an agent's context, including re-ranking retrieved passages or picking the top k |

@@ -75,6 +75,7 @@ Each recipe lists: **state** (facts to send), **code first** (facts code or a cr
 - **Code first:** hard rules such as VIP or legal-hold routing.
 - **Question:** `queue` choice, "Which team should handle this?" Criteria: one key per team with its scope, plus `insufficient_context`.
 - **Level:** automate when not flagged.
+- **App or function variant:** for a request to use an app or function, replace `queue` with `destination` choice, "Which supplied app or function can handle this request?" Criteria: one key per caller-supplied app or function id with its capability, plus `none_fit` and `insufficient_context`. Code validates the chosen id and applies its permission rules before any call. For app → operation → target routing, ask each level only over candidates valid for the preceding choice; continue only when that choice clears its threshold. Stop for review on a fallback or uncertain answer.
 
 ## 12. model-choice
 - **State:** the task summary; hard constraints (allowed providers, data rules, budget); reasoning difficulty, dependent steps, desired autonomy, available verification, and cost of a late error, each stated separately; the priority order (correct end-to-end result, then fewer avoidable human interventions, then total cost including retries).
@@ -116,6 +117,7 @@ Each recipe lists: **state** (facts to send), **code first** (facts code or a cr
 - **Questions:** `phase` choice, "Which situation is the loop in?" Criteria: one key per phase the code handles, plus `insufficient_context`. For each phase, `action_<phase>` choice, "If the situation is <phase>, which legal action is best now?" Criteria: one key per legal action id, plus `insufficient_context`. All in one request.
 - **Combine:** require `phase` to clear its threshold, then use only `action_<that phase>`, and only when it also clears its threshold; otherwise take the fallback. Log every step so a run can be replayed, and judge the loop by its real outcome (score, arrival, error rate), not by the answers.
 - **Level:** automate inside simulations and games; human review before the loop controls anything physical, financial, or irreversible.
+- **Live-text variant:** send only the current stable transcript window. Ask `readiness` choice, "Does this window contain a complete request that can be acted on now?" Criteria: `act` complete request, `wait` more speech needed, `insufficient_context` unclear. Use the operation and target questions only when `act` clears its threshold; their options must be supplied by code. On `wait`, retain the window. After a successful action, record the consumed transcript position and remove that window so the same words cannot trigger the action twice. On uncertainty or timeout, take the caller's safe fallback without consuming the window.
 
 ## 17. calibrate
 - **State:** one real item per batch line with a code-assigned `id`, never its label. Sample at least 50 items, more for rare classes.
