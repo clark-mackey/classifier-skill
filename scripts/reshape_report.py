@@ -62,10 +62,11 @@ def group(records: list[dict], field: str, missing: str) -> dict[str, dict]:
 
 
 def summarize(records: list[dict]) -> dict:
-    types, tasks, flags = Counter(), Counter(), Counter()
+    types, tasks, flags, review = Counter(), Counter(), Counter(), Counter()
     for r in records:
         types.update((r.get("questions") or {}).values())
         flags.update(r.get("flags_by_question") or {})
+        review.update(r.get("human_by_question") or {})
         if r.get("task"):
             tasks[r["task"]] += 1
     calls = len(records)
@@ -80,6 +81,7 @@ def summarize(records: list[dict]) -> dict:
         "cost": round(sum(number(r.get("cost")) for r in records), 6),
         "question_types": dict(types),
         "flags_by_question": dict(flags.most_common()),
+        "review_by_question": dict(review.most_common()),
         "by_recipe": group(records, "recipe", "(custom)"),
         "by_caller": group(records, "caller", "(direct)"),
         "top_tasks": tasks.most_common(10),
@@ -107,6 +109,8 @@ def main() -> None:
     print(f"question types: {summary['question_types']}")
     if summary["flags_by_question"]:
         print(f"flags per question (batch calls): {summary['flags_by_question']}")
+    if summary["review_by_question"]:
+        print(f"sent to a person per question (sheet calls): {summary['review_by_question']}")
     for label, rows in (("recipe", summary["by_recipe"]), ("caller", summary["by_caller"])):
         print(f"{label:<22}{'calls':>6}{'failed':>7}{'items':>7}{'q/call':>8}{'flagged':>9}{'rate':>7}{'cost':>11}")
         for name, row in rows.items():

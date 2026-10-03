@@ -352,7 +352,7 @@ def main() -> None:
     if not args.dry_run and not bypass:
         jev.log_call(args, {"caller": jev.caller_slug(args.caller or sheet["sheet"]), "task": versions["sheet"],
                             "recipe": sheet.get("recipe") or "custom"}, template, {
-            "mode": "items", "items": len(items), "flagged": flagged, "human": human, "invalid": failed.get("invalid_answer", 0),
+            "mode": "items", "items": len(items), "flagged": flagged, "human": human, "human_by_question": counts["human"], "invalid": failed.get("invalid_answer", 0),
             "unanswered": counts["unanswered"], "redacted": redacted, "input_tokens": tokens,
             "cost": round(cost, 8) or None, "model": sorted(m for m in models if m),
             "seconds": summary["seconds"]})

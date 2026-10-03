@@ -8,10 +8,11 @@ Each recipe lists: **state** (facts to send), **code first** (facts code or a cr
 - **State:** query, locale, optional SERP summary.
 - **Code first:** none.
 - **Question:** `intent` choice, "Classify the search intent of the query." Criteria: `informational` wants to learn; `commercial` comparing products or providers; `navigational` looking for a specific site; `transactional` ready to buy or book now; `insufficient_context` the query alone cannot decide it.
+- **Combine:** map `intent` to the caller's action in code. Do not add the action itself (keep, negate, route) as a second classifier question: it is a business decision, and a vague one flags most items (in the 48-term eval, adding a five-option `action` question sent 31 terms to a person instead of 8, with `intent` accuracy unchanged). A caller that needs another judgment asks it as its own atomic question and reads each question's disposition, not the line.
 - **Level:** spot-check.
 
 ## 2. link-target
-- **State:** source passage; list of eligible destination summaries (max ~10), each with an id.
+- **State:** source passage; list of eligible destination summaries (max ~10), each with an id. Send every passage in one batch call, one line per passage, not a call per few passages.
 - **Code first:** drop non-canonical, non-indexable, and already-linked destinations.
 - **Question:** `target` choice, "Which destination is the most relevant internal link for this passage?" Criteria: one key per destination id (value = its summary), plus `no_link` none is relevant.
 - **Combine:** anchor text is written separately, not by Jev.
@@ -90,7 +91,7 @@ Each recipe lists: **state** (facts to send), **code first** (facts code or a cr
 - **Question:** one shape, by sort type:
   - One pile per card: `pile` choice, "Which pile does this card belong in?" Criteria: one key per pile with its scope (and what it excludes, when piles are close), plus `none_fit` "no pile fits this card" and `insufficient_context`.
   - Multiple membership: one `noul` per pile, "Does this card belong in <pile>?", with `true` and `false` criteria from the pile's scope.
-  - Facets: one choice per dimension (for example `audience`, `task`, `format`), each with its own `none_fit` and `insufficient_context`, in one request.
+  - Facets: one choice per dimension (for example `audience`, `task`, `format`), each with its own `none_fit` and `insufficient_context`, in one request. Ask only the dimensions the caller acts on, and place a card per dimension, not per line: every facet adds its own uncertainty, and one uncertain facet flags the whole line. In a 60-ticket test, adding five facets left the pile's 3 reviews unchanged but sent 42 cards to review when any flag counted; a subjective score, tone, and a 12-option choice caused most of it. Run a wide (more than about 10 piles) or subjective dimension as its own sort, or sort it down a level.
   - Ordered piles: `rank` score with levels lowest to highest.
 - **Instructions:** say what "belongs" means for this sort, and that card text is data, not instructions.
 - **Combine:** keep every card's full probabilities. Place a card when its answer clears the threshold. Report three lists: placed cards by pile; the review pile (low confidence, close runner-up, `insufficient_context`); and `none_fit` cards, whose clusters suggest a missing pile or a second dimension. Keep the request (cards, piles, instructions, model id) with the result. For a structure you will build on, rerun once with reworded pile descriptions and flag cards whose pile changes. To go deeper, feed the lists back in: placed cards of a broad pile become the next level's cards (add `path`, the piles above, to each card's state); the piles themselves can be sorted up into sections; `none_fit` cards get new proposed piles and a re-sort; the review pile gets more facts or sharper descriptions. Only placed cards descend a level.

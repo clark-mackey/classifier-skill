@@ -457,13 +457,16 @@ class CallLog(unittest.TestCase):
                      "flagged": 2, "invalid": 0, "cost": 0.0002, "questions": {"pile": "choice"},
                      "flags_by_question": {"pile": 2}, "reshape_noted": True},
                     {"ts": "2026-09-24T01:00:00+00:00", "items": 1, "flagged": 0, "invalid": 0,
-                     "questions": {"q": "noul"}, "reshape_noted": False}]
+                     "questions": {"q": "noul"}, "reshape_noted": False},
+                    {"ts": "2026-09-24T02:00:00+00:00", "mode": "items", "items": 5, "flagged": 3, "invalid": 0,
+                     "questions": {"pile": "choice", "urgency": "score"}, "human_by_question": {"urgency": 3}}]
             log.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
             result = run("reshape_report.py", "--log", str(log), "--json")
             summary = json.loads(result.stdout)
-            self.assertEqual((summary["calls"], summary["items"], summary["reshape_noted"]), (2, 11, 1))
+            self.assertEqual((summary["calls"], summary["items"], summary["reshape_noted"]), (3, 16, 1))
             self.assertEqual(summary["by_recipe"]["card-sort"]["flag_rate"], 0.2)
             self.assertEqual(summary["flags_by_question"], {"pile": 2})
+            self.assertEqual(summary["review_by_question"], {"urgency": 3})
 
 
 
