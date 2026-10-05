@@ -24,6 +24,9 @@ The deciding test: the answer is one of a finite set you can name in advance, it
 | Rank or sort by rubric | `score` per item, sort in code | inbox worst first, backlog by impact |
 | Compare two items | `choice` over relations | duplicate / partial overlap / distinct; same entity or not |
 | Match against supplied candidates | `choice` over candidate ids | best link target, matching FAQ entry, entity resolution, legal moves or rows code generated |
+| Triage exported audit findings | issue-route and issue-priority recipes | rows from a crawler or site-audit export (xlsx, csv) before a fix list is written |
+| Type anchors for a link-mix audit | anchor-type recipe | how many keyword-heavy anchors a page has, after code counts exact matches |
+| Separate competitors from noise | serp-result-type recipe | search results or competitor exports before benchmarking |
 | Check a claim against a supplied source | citation-support recipe | supports / contradicts / no evidence |
 | Check a draft against requirements | one `noul` per requirement | covers each brief point, follows each style rule |
 | Screen copy sentence by sentence before it publishes | copy-screen recipe | unsupported claims, guaranteed results, testimonials without disclaimers, identifiable patient details in an ad or page |

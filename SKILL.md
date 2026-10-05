@@ -1,6 +1,6 @@
 ---
 name: classifier-skill
-description: Use when a task means judging each of many items — tag, sort, filter, route, triage, check, score, rank, or dedupe a list — or picking among prebuilt options per visitor, request, or loop step, or when the user names Jev, TypeSafe, or classifier-skill. Reshapes that judgment into typed questions for a fast, cheap non-generative classifier (default TypeSafe Jev, via OpenRouter or TypeSafe directly) so the working LLM does not spend tokens on it. Not for a single quick judgment, for writing or open reasoning, or for local-only data unless a model runs on this machine.
+description: Use when a task means judging each of many items — tag, sort, filter, route, triage, check, score, rank, or dedupe a list (search terms, negatives, keywords, audit findings) — or picking among prebuilt options per visitor, request, or loop step, or when the user names Jev, TypeSafe, or classifier-skill. Reshapes that judgment into typed questions for a fast, cheap non-generative classifier (default TypeSafe Jev, via OpenRouter or TypeSafe directly) so the working LLM does not spend tokens on it. Not for a single quick judgment, for writing or open reasoning, or for local-only data unless a model runs on this machine.
 compatibility: Requires Python 3 and OPENROUTER_API_KEY or TYPESAFE_API_KEY, or Ollama 0.35+ with a decision model for local data.
 ---
 
@@ -17,6 +17,8 @@ Treat "must stay on this machine", "local only", "no cloud", or "don't send it a
 The classifier is fast and cheap; an LLM judging the same things one by one spends far more tokens. Before an LLM works through many items making the same kind of call, reshape the work so the classifier makes it. [references/jev-work.md](references/jev-work.md) lists work that always qualifies, work to split, and work that never does.
 
 A task qualifies when the answer is one of a finite set you can name in advance (and avoids the classifier's known weak spots, listed in jev-work.md), it depends on meaning rather than an exact rule, and its facts can be written into `state`. Repetition (many items, or the same check every run) makes it worth doing; a single judgment the working model is already making in passing does not.
+
+Spot it in results, not only in requests. Requests usually name a workflow ("run the weekly sweep", "audit the site"), and the per-item work shows up only when a tool returns a list: a search-terms report, a keyword or anchor export, audit findings, search results. When you are about to judge 20 or more such rows one at a time, or the user starts labeling them by hand, that is this skill's work.
 
 1. Separate the judgment from the rest. The LLM keeps writing and reasoning; code keeps rules, counts, and lookups; the classifier takes the per-item decisions.
 2. Items become cards (`state`), decisions become questions, answer sets become piles or rubric levels.
@@ -81,6 +83,8 @@ If the request matches a row, read that recipe in [references/recipes.md](refere
 | `meta-description` | whether a meta description fits its page and intent |
 | `brand-mention` | how an AI answer mentions a brand |
 | `backlink-fit` | whether a page is a good link prospect |
+| `anchor-type` | typing anchors for a link-mix audit, after code counts exact matches |
+| `serp-result-type` | separating direct competitors from directories, publishers, and adjacent providers in search results |
 
 - Start from actions, not data. List what the code will do next, then write each action's trigger as one sentence; that sentence is the question, and the action sets its type: act or not → `noul`, route → `choice`, rank or sort → `score`. Then add what else could be true that would change the routing (edge cases become questions too).
 - `state`: only facts needed for the decision, already verified by code or the user. Do not send the whole conversation, repository, or vault. The classifier judges meaning; counts, status codes, and other facts are established first. When an item has several facts, send an object with named fields (`{"email": {...}, "customer": {"plan": ...}}`) so instructions can refer to fields by name; drop irrelevant text such as thread history. The classifier cannot see the surrounding conversation.

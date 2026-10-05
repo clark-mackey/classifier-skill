@@ -151,3 +151,19 @@ Each recipe lists: **state** (facts to send), **code first** (facts code or a cr
 - **Combine:** use a slot's pick only above threshold; otherwise use the default part. Code orders the slots, enforces required blocks, and removes repeated proof. Set a latency budget; on a late or failed call, serve the default page. Log each pick with the outcome, and judge the recipe by a test against the default page, not by confidence.
 - **Level:** automate when every part is pre-approved, since the worst case is the default page. A person reviews the part library itself.
 - **Many-parts variant:** when one slot draws from dozens of chunks, score each chunk with the `context-select` top-k variant instead of offering one long choice.
+
+## 21. anchor-type
+- **When:** auditing a site's internal or external anchor mix, for example deciding how many keyword-heavy anchors to keep for a page.
+- **State:** anchor text, the sentence around it, the target page's primary keyword, and the business's brand names.
+- **Code first:** exact match (normalized anchor equals the target keyword), naked URLs, empty and image anchors, and anchors that are exactly a brand name are string checks. Ask only about the rest.
+- **Question:** `anchor_type` choice, "What kind of anchor text is this, for this target page?" Criteria: `partial_match` names the target page's topic in other words or with extra words; `branded` names the business, a person there, or its product names; `generic` says nothing about the target ("click here", "learn more", "this page"); `off_topic` describes a different topic than the target page; `insufficient_context` cannot tell from the text given.
+- **Combine:** count types per target page in code and compare with the caller's policy for the mix. The policy, such as how many exact-match anchors to keep, is the caller's, not the classifier's.
+- **Level:** automate the tags; a person decides which anchors to change.
+
+## 22. serp-result-type
+- **When:** separating real competitors from noise in search results or a competitor export before benchmarking against them.
+- **State:** result title, domain, snippet, and the business's service and market in one line.
+- **Code first:** the business's own domains, known directories and marketplaces from a domain list, ads versus organic results, and position.
+- **Question:** `result_type` choice, "What is this search result, relative to the business described?" Criteria: `direct_competitor` a business offering the same service to the same market; `adjacent_provider` a related service or specialty that competes for some of the same customers; `directory_or_marketplace` listings, review sites, booking or lead marketplaces; `publisher` news, blogs, health or reference content; `other` none of these; `insufficient_context`.
+- **Combine:** the competitor set is `direct_competitor` above threshold, plus `adjacent_provider` when the caller opts in. Store the domain's answer so repeat results make no call.
+- **Level:** spot-check.
