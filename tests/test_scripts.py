@@ -1162,6 +1162,14 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual((len(sent), summary["answered"]), (4, 3))
 
 
+class RecipeFiles(unittest.TestCase):
+    def test_old_search_intent_name_keeps_the_same_questions(self):
+        recipes = SCRIPTS.parent / "recipes"
+        old, new = (json.loads((recipes / f"{name}@1.json").read_text()) for name in ("search-intent", "paid-search-intent"))
+        self.assertEqual(old["questions"], new["questions"])
+        self.assertEqual(new["recipe"], "paid-search-intent")
+
+
 class ScoreLabels(unittest.TestCase):
     def test_accuracy_coverage_and_holdout(self):
         with tempfile.TemporaryDirectory() as tmp:

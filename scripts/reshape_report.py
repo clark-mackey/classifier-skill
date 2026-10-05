@@ -71,8 +71,11 @@ def summarize(records: list[dict]) -> dict:
             tasks[r["task"]] += 1
     calls = len(records)
     items = sum(number(r.get("items")) for r in records)
+    stamps = sorted(str(r["ts"]) for r in records if r.get("ts"))
     return {
         "calls": calls,
+        "first": stamps[0] if stamps else None,
+        "last": stamps[-1] if stamps else None,
         "items": items,
         "reshape_noted": sum(bool(r.get("reshape_noted")) for r in records),
         "failed": sum(bool(r.get("failed")) for r in records),
@@ -106,16 +109,18 @@ def main() -> None:
     print(f"{summary['calls']} calls, {summary['items']:g} items, {summary['reshape_noted']} with a reshape note, "
           f"flag rate {summary['flag_rate']}, {summary['invalid']:g} invalid, {summary['failed']} failed, "
           f"cost ${summary['cost']}")
+    print(f"log covers {summary['first']} to {summary['last']}")
     print(f"question types: {summary['question_types']}")
     if summary["flags_by_question"]:
         print(f"flags per question (batch calls): {summary['flags_by_question']}")
     if summary["review_by_question"]:
         print(f"sent to a person per question (sheet calls): {summary['review_by_question']}")
     for label, rows in (("recipe", summary["by_recipe"]), ("caller", summary["by_caller"])):
-        print(f"{label:<22}{'calls':>6}{'failed':>7}{'items':>7}{'q/call':>8}{'flagged':>9}{'rate':>7}{'cost':>11}")
+        print(f"{label:<22}{'calls':>6}{'failed':>7}{'items':>7}{'q/call':>8}{'flagged':>9}{'rate':>7}"
+              f"{'invalid':>8}{'cost':>11}")
         for name, row in rows.items():
             print(f"{name:<22}{row['calls']:>6}{row['failed']:>7}{row['items']:>7g}{row['questions_per_call']:>8}"
-                  f"{row['flagged']:>9g}{str(row['flag_rate']):>7}{row['cost']:>11.6f}")
+                  f"{row['flagged']:>9g}{str(row['flag_rate']):>7}{row['invalid']:>8g}{row['cost']:>11.6f}")
     if summary["top_tasks"]:
         print("most frequent reshaped tasks:")
         for task, count in summary["top_tasks"]:

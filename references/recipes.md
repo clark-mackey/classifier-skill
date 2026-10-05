@@ -10,6 +10,7 @@ Each recipe lists: **state** (facts to send), **code first** (facts code or a cr
 - **Question:** `intent` choice, "Classify the search intent of the query." Criteria: `informational` wants to learn; `commercial` comparing products or providers; `navigational` looking for a specific site; `transactional` ready to buy or book now; `insufficient_context` the query alone cannot decide it.
 - **Combine:** map `intent` to the caller's action in code. Do not add the action itself (keep, negate, route) as a second classifier question: it is a business decision, and a vague one flags most items (in the 48-term eval, adding a five-option `action` question sent 31 terms to a person instead of 8, with `intent` accuracy unchanged). A caller that needs another judgment asks it as its own atomic question and reads each question's disposition, not the line.
 - **Level:** spot-check.
+- **Not the sheet recipe.** `recipes/paid-search-intent@1.json` is a different question set for paid-search terms judged against one business (`wants_service`, `researching`, `own_brand`, `competitor`, …). Pin that one in a sheet; `recipes/search-intent@1.json` is the same set under its old name, kept only for sheets that already pin it. Action rules written for this section's criteria never match it.
 
 ## 2. link-target
 - **State:** source passage; list of eligible destination summaries (max ~10), each with an id. Send every passage in one batch call, one line per passage, not a call per few passages.

@@ -19,6 +19,22 @@ def unwrap(command):
     return WRAPPER.sub("", command).replace('\\"', '"')
 
 
+SKILL_NAME = re.compile(r"classifier-skill|jev-openrouter")  # jev-openrouter: the skill's old name
+SKILL_DOC = re.compile(r"(?:^|[/\s'\"])(?:SKILL\.md|references/)")
+
+
+def reads_skill(command):
+    """True when the command reads the skill's instructions (cat, sed, ... on SKILL.md or references/, also after
+    a `cd` into the skill), not when it only searches for the skill by name or runs its scripts."""
+    if not SKILL_NAME.search(command):
+        return False
+    for part in re.split(r"&&|;|\|", command):
+        first = part.split(None, 1)
+        if first and first[0].rsplit("/", 1)[-1] in READERS and SKILL_DOC.search(part):
+            return True
+    return False
+
+
 def reads_source(command):
     """True when the command only reads a script (sed, rg, cat, ...) rather than running it."""
     first = unwrap(command).split(None, 1)
@@ -69,7 +85,7 @@ def facts(run):
                  and not any(flag in c for flag in INFO_ONLY)]
     log = call_log(run)
     return {
-        "skill_read": any("classifier-skill" in c or "skills/jev-openrouter" in c for c in commands),  # old name
+        "skill_read": any(reads_skill(c) for c in commands),
         # the call log is written only by calls that reached the provider, so it is the stronger evidence
         "jev_live_call": log["log_calls"] > 0 or any("--dry-run" not in c for c in jev_calls),
         "jev_dry_run": any("--dry-run" in c for c in jev_calls),

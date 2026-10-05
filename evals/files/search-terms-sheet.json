@@ -2,7 +2,7 @@
   "sheet": "eval-med-spa-terms",
   "version": 1,
   "contract": "1.3",
-  "recipe": "search-intent@1",
+  "recipe": "paid-search-intent@1",
   "data": "cloud_ok",
   "min_items": 20,
   "model": "typesafe/jev-1.13",

@@ -1,0 +1,21 @@
+{
+  "recipe": "paid-search-intent",
+  "version": 1,
+  "about": "Generic: what a searcher typing a query into a search engine most likely wants, relative to one business. Holds no caller's rules; a sheet adds the business in `context` and its own action questions. Renamed from search-intent@1 (same questions), which stays for sheets that already pin it; the search-intent recipe in references/recipes.md is a different, general question set.",
+  "questions": {
+    "intent": {
+      "type": "choice",
+      "instructions": "The item is one search query that triggered this business's paid search ad. The context describes the business. Pick what the searcher most likely wants. Judge only the query's words and the business description, not the item's metrics.",
+      "criteria": {
+        "wants_service": "Wants to buy, book, or price a service or product this business offers, including a location or 'near me' variant.",
+        "researching": "Wants information about a treatment, product, or condition this business offers (how it works, side effects, before and after), with no clear intent to buy yet.",
+        "own_brand": "Looking for this business by name, address, phone, or login.",
+        "competitor": "Looking for a different, named business or brand.",
+        "job_seeker": "Looking for a job, training, certification, or course, not a service.",
+        "unrelated": "Wants a product, service, or topic this business does not offer, or the words are unrelated to it.",
+        "none_fit": "The query fits none of the other options.",
+        "insufficient_context": "The query is too vague or garbled to judge."
+      }
+    }
+  }
+}
