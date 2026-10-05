@@ -549,10 +549,10 @@ class SyncTheBuildLoop(unittest.TestCase):
             self.assert_published_without_context(remote, published)
 
     def assert_published_without_context(self, remote, published):
-        """The mirror holds the canonical tree minus context/, and no canonical commit is in its history."""
+        """The mirror holds the canonical tree minus the research paths, and no canonical commit is in its history."""
         names = set(self.git("--git-dir", remote, "ls-tree", "--name-only", published).splitlines())
         canonical = set(self.git("--git-dir", self.canonical, "ls-tree", "--name-only", "main").splitlines())
-        self.assertEqual(names, canonical - {"context"})
+        self.assertEqual(names, canonical - {"context", "data", "jev-use-patterns.md"})
         self.assertNotEqual(self.git("--git-dir", remote, "rev-list", "--count", published),
                             self.git("--git-dir", self.canonical, "rev-list", "--count", "main"))
         for path in ("SKILL.md", "scripts/jev_decide.py"):

@@ -20,7 +20,7 @@ from typing import Optional
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REMOTE = "https://github.com/The-Build-Loop/classifier-skill.git"
 CANONICAL_REMOTE = "https://github.com/clark-mackey/classifier-skill.git"
-EXCLUDED = ("context",)
+EXCLUDED = ("context", "data", "jev-use-patterns.md")
 
 
 def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
