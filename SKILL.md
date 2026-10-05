@@ -1,6 +1,7 @@
 ---
 name: classifier-skill
 description: Use when a task means judging each of many items — tag, sort, filter, route, triage, check, score, rank, or dedupe a list — or picking among prebuilt options per visitor, request, or loop step, or when the user names Jev, TypeSafe, or classifier-skill. Reshapes that judgment into typed questions for a fast, cheap non-generative classifier (default TypeSafe Jev, via OpenRouter or TypeSafe directly) so the working LLM does not spend tokens on it. Not for a single quick judgment, for writing or open reasoning, or for local-only data unless a model runs on this machine.
+compatibility: Requires Python 3 and OPENROUTER_API_KEY or TYPESAFE_API_KEY, or Ollama 0.35+ with a decision model for local data.
 ---
 
 # Reshape judgment work for a classifier model
@@ -21,7 +22,7 @@ A task qualifies when the answer is one of a finite set you can name in advance 
 2. Items become cards (`state`), decisions become questions, answer sets become piles or rubric levels.
 3. Run it, act on the answers in code, and hand back to the LLM or a person only what the classifier left undecided: flagged, `none_fit`, or below threshold.
 
-Once this skill is loaded for a list of 3 or more items, run the classifier (a dry run when the user asked for one). Do not answer the items from your own judgment instead; if the call fails, report the failure rather than substituting your answers. The one exception is the sheet path below, whose `judge` step hands some items back to you; label those judgments as your own, not the classifier's.
+Once this skill is loaded for a list of 3 or more items, run the classifier (a dry run when the user asked for one). Do not answer the items from your own judgment instead; if the call fails, report the failure rather than substituting your answers. The one exception is the sheet path below, which hands some items back to you; label those judgments as your own, not the classifier's.
 
 Show the reshape before calling, so it can be reviewed:
 
@@ -111,9 +112,9 @@ python3 <skill-directory>/scripts/jev_decide.py <<'JSON'
 JSON
 ```
 
-Every question needs non-empty `instructions`. Before sending, the script replaces secrets in `state` (API keys, tokens, JWTs, private keys, `password=`-style values, and fields named like secrets) with `[REDACTED:<kind>]` and reports the count on stderr; `--no-redact` turns this off. It refuses (exit 2) a request whose state plus longest question is over about 32k tokens, or 64k for the whole payload, the jev-1.13 limits; trim state in code rather than raising them. Ollama requests additionally enforce its 64-question, 26-option, and 64 KiB limits; Nimble requests enforce its approximate 8,192-token context. `noul` criteria, when given, are `{"true": "...", "false": "..."}`; `score` criteria are a list of strings, lowest first.
+Every question needs non-empty `instructions`. `noul` criteria, when given, are `{"true": "...", "false": "..."}`; `score` criteria are a list of strings, lowest first. Before sending, the script replaces secrets in `state` with `[REDACTED:<kind>]` and reports the count (`--no-redact` turns this off), and it refuses (exit 2) a request over the model's size limits (about 32k tokens of state plus the longest question for jev-1.13); trim state in code rather than raising them.
 
-The script reaches Jev through `--provider openrouter` (`OPENROUTER_API_KEY`, pinned `typesafe/jev-1.13`) or `--provider typesafe` (`TYPESAFE_API_KEY`, pinned `jev-1.13.0`). Without the flag it uses `CLASSIFIER_PROVIDER`, else whichever hosted key is set, OpenRouter first. Each key is sent only to its own host. `--provider ollama` calls `http://127.0.0.1:11434/v1/systemone`, defaults to `nimble:9b`, needs Ollama 0.35 or later, needs no key, and refuses non-loopback endpoints even without `--local-only`. Ollama System One accepts supported decision models such as Nimble and Tev1; an arbitrary imported chat model or Winnow import is not automatically supported. `--provider compatible` reaches another server that speaks the same shapes and is also explicit-only. [references/providers.md](references/providers.md) covers configuration and calibration. Provider thresholds never transfer. The script retries briefly on rate limits and server errors, checks every answer against the questions asked, and fails loudly on malformed answers. Valid output gains a `review` object; `--dry-run` validates and prints the outgoing payload without sending it.
+Hosted Jev is reached with `--provider openrouter` or `--provider typesafe`; without the flag the script uses `CLASSIFIER_PROVIDER`, else whichever hosted key is set, OpenRouter first, and each key goes only to its own host. `--provider ollama` (loopback only, default `nimble:9b`) and `--provider compatible` are used only when named. Keys, models, limits, local servers, and the endpoints' contract status are in [references/providers.md](references/providers.md); provider thresholds never transfer. The script retries briefly, checks every answer against the questions asked, and fails loudly on malformed answers. Valid output gains a `review` object; `--dry-run` validates and prints the outgoing payload without sending it.
 
 **Many items, one template:** for 3 or more items (keywords, pages, cards), always use batch mode rather than separate calls: write one state per line to a JSONL file created with `mktemp` (never a fixed path such as `/tmp/x.jsonl`), pipe the request without `state`, and pass `--batch FILE`. It prints one JSON result per line (if a request fails after its retries, it stops there, keeps the lines already printed, and exits 1) and, on stderr, counts of flagged and invalid items, flags per question, and total cost. Report the counts and the flagged lines, not every line; with many questions per item, read the per-question counts, since one uncertain question flags the whole line. A large batch (thousands of items with several questions each) can run longer than ten minutes: run it in the background with a long timeout, and write each run to a new output file so a stopped run never overwrites finished results.
 
@@ -122,23 +123,13 @@ After a live call, report the selected answer, the runner-up and its probability
 - **Spot-check:** acceptable but not proven on this kind of input.
 - **Human review:** any `review` reason, missing facts, or a material consequence. Medical, legal, and financial claims always get human review.
 
-Each invocation appends one metadata line to a private (mode 0600) call log: the reshape note (keep its fields to short generic labels with no item or client text; each is cut at 120 characters), recipe, question types, option counts, items, flags, invalid answers, tokens, cost, and time, never `state` or answers. The default is `~/.local/state/classifier-skill/calls.jsonl`; `CLASSIFIER_SKILL_LOG` sets another path or `off`. `python3 <skill-directory>/scripts/reshape_report.py` summarizes it by recipe, for reviewing reshaped work and re-tuning the skill. Re-tuning is a person's decision: propose one recipe change at a time from the report, rerun that recipe's eval cases, and change the recipe only when they still pass.
+Each invocation appends one metadata line to a private (mode 0600) call log: the reshape note (keep its fields to short generic labels with no item or client text; each is cut at 120 characters), recipe, question types, option counts, items, flags, invalid answers, tokens, cost, and time, never `state` or answers. The default is `~/.local/state/classifier-skill/calls.jsonl`; `CLASSIFIER_SKILL_LOG` sets another path or `off`. `python3 <skill-directory>/scripts/reshape_report.py` summarizes it by recipe. Re-tuning a recipe is a person's decision; propose changes with the protocol in [references/retune.md](references/retune.md).
 
 If the endpoint fails, show that result instead of silently substituting another model or your own opinion. Only the sheet path below hands items back to you, and then openly.
 
-The OpenRouter Decisions endpoint is alpha (contract last verified 2026-09-23; re-check when a call fails validation or every 90 days). TypeSafe's direct API shares the same request and answer shapes (per its docs, 2026-09-23; not yet exercised by this skill). Ollama System One was contract-tested from its documented response shape on 2026-09-30. If a contract changes, consult the current [TypeSafe API reference](https://docs.typesafe.ai/api), [TypeSafe agent documentation](https://docs.typesafe.ai/agent-skill), [OpenRouter Jev example](https://openrouter.ai/labs/jev/compile), or [Ollama decision-model documentation](https://ollama.com/library/nimble) before changing the wrapper.
-
 ## Judge a list with a sheet
 
-When a question sheet exists for the task (a caller's, or one kept in `~/.config/classifier-skill/sheets/`), run `judge` instead of writing the batch yourself:
-
-1. Write the items to a JSONL file created with `mktemp`, one object per line, with the sheet's id and card fields.
-2. Run `python3 <skill-directory>/scripts/classify_items.py --sheet <sheet> --items <file> --out <out> --summary <summary> --caller <calling skill>`.
-3. Read the summary. If it is missing, `complete` is false, or `items_out` differs from `items_in`, judge the original list yourself and label those judgments as yours.
-4. Apply the calling step's own rules to `answered` dispositions, list `human` ones for review, and judge `unanswered` items yourself, labelled as yours. Items with `below_min_items` are expected: a sheet's `min_items` (default 20) is the caller's threshold and replaces the 3-item rule above. Any other reason is a failure to report. A dry run sends nothing and shows every payload, whatever the item count.
-5. End with the `Classifier: <answered>/<human>/<unanswered> (<reasons>)` line the script prints.
-
-Sheets hold data only: questions or a generic recipe from `recipes/`, the card fields, thresholds, and the data rule; the schema is in [references/callers.md](references/callers.md). An answer is evidence, never permission to act.
+When a question sheet exists for the task (a caller's, or one kept in `~/.config/classifier-skill/sheets/`), run `scripts/classify_items.py` instead of writing the batch yourself, following [references/sheets.md](references/sheets.md). A sheet's `min_items` (default 20) replaces the 3-item rule, and the items it hands back are judged by you and labelled as yours.
 
 ## Called from another skill
 

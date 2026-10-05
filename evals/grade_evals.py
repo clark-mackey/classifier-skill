@@ -69,7 +69,7 @@ def facts(run):
                  and not any(flag in c for flag in INFO_ONLY)]
     log = call_log(run)
     return {
-        "skill_read": any("classifier-skill" in c for c in commands),
+        "skill_read": any("classifier-skill" in c or "skills/jev-openrouter" in c for c in commands),  # old name
         # the call log is written only by calls that reached the provider, so it is the stronger evidence
         "jev_live_call": log["log_calls"] > 0 or any("--dry-run" not in c for c in jev_calls),
         "jev_dry_run": any("--dry-run" in c for c in jev_calls),

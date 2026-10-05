@@ -52,3 +52,7 @@ Local-only data may go only to a server on this machine: use `--provider ollama`
 ## Before relying on another model
 
 Answers from different models are not comparable: a threshold tuned on Jev does not carry over. Run the `calibrate` recipe on the new provider with the same labeled sample before automating anything with it, and keep the model id with the results. The call log records the provider of every call.
+
+## Contract status
+
+The OpenRouter Decisions endpoint is alpha (contract last verified 2026-09-23; re-check when a call fails validation or every 90 days). TypeSafe's direct API shares the same request and answer shapes (per its docs, 2026-09-23; not yet exercised by this skill). Ollama System One was contract-tested from its documented response shape on 2026-09-30. If a contract changes, consult the current [TypeSafe API reference](https://docs.typesafe.ai/api), [TypeSafe agent documentation](https://docs.typesafe.ai/agent-skill), [OpenRouter Jev example](https://openrouter.ai/labs/jev/compile), or [Ollama decision-model documentation](https://ollama.com/library/nimble) before changing the wrapper.
