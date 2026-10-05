@@ -1,0 +1,26 @@
+{
+  "answered": 48,
+  "bypass": false,
+  "complete": true,
+  "contract": "1.3",
+  "cost": 0.00137735,
+  "degraded": false,
+  "dry_run": false,
+  "human_by_question": {
+    "intent": 8
+  },
+  "items_in": 48,
+  "items_out": 48,
+  "model": "typesafe/jev-1.13",
+  "models_reported": [
+    "typesafe/jev-1.13-20260917"
+  ],
+  "provider": "openrouter",
+  "recipe": "search-intent@1",
+  "redacted": 0,
+  "run_id": "f0717bcef56f",
+  "seconds": 31.22,
+  "sheet": "eval-med-spa-terms@1",
+  "skip_by_question": {},
+  "unanswered": {}
+}

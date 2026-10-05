@@ -1,0 +1,986 @@
+{
+ "categorize": [
+  {
+   "count": 44,
+   "mean_fit": 1.5
+  },
+  {
+   "name": "Company invoices, classified for the books",
+   "url": "https://madewithjev.com/builds/invoice-accounting",
+   "sub": "Every invoice reviewed and given an accounting category in seconds.",
+   "fit": 2.36,
+   "rllm": 0.27,
+   "multi": 0.14,
+   "esc": 0.11
+  },
+  {
+   "name": "A shortlist from a competitor swipe file",
+   "url": "https://madewithjev.com/builds/competitor-ad-shortlist",
+   "sub": "Ads broken down by hook, angle, offer and format.",
+   "fit": 2.67,
+   "rllm": 0.11,
+   "multi": 0.29,
+   "esc": 0.04
+  },
+  {
+   "name": "1kpapers",
+   "url": "https://madewithjev.com/builds/1kpapers",
+   "sub": "1,018 AI papers sorted by topic for $0.08 and published as a site.",
+   "fit": 2.28,
+   "rllm": 0.43,
+   "multi": 0.25,
+   "esc": 0.06
+  },
+  {
+   "name": "A thousand papers sorted, then graded",
+   "url": "https://madewithjev.com/builds/1000-papers-graded-by-opus",
+   "sub": "Jev does the 24-topic sort, Opus 5 grades the labels.",
+   "fit": 2.26,
+   "rllm": 0.2,
+   "multi": 0.68,
+   "esc": 0.59
+  },
+  {
+   "name": "DocJev",
+   "url": "https://madewithjev.com/builds/docjev",
+   "sub": "Classify and split document packets with Jev. Open source and free by default.",
+   "fit": 2.2,
+   "rllm": 0.56,
+   "multi": 0.18,
+   "esc": 0.09
+  },
+  {
+   "name": "3,282 posts, eight questions each",
+   "url": "https://madewithjev.com/builds/x-post-analysis",
+   "sub": "Ian Nuttall scored his whole X archive for $0.1282.",
+   "fit": 2.37,
+   "rllm": 0.15,
+   "multi": 0.91,
+   "esc": 0.05
+  }
+ ],
+ "route_model": [
+  {
+   "count": 31,
+   "mean_fit": 1.3
+  },
+  {
+   "name": "A structured decision with a probability",
+   "url": "https://madewithjev.com/builds/a-decision-with-a-probability",
+   "sub": "Useful for model routing and for agent loops.",
+   "fit": 2.46,
+   "rllm": 0.7,
+   "multi": 0.1,
+   "esc": 0.3
+  },
+  {
+   "name": "jev-router (skill)",
+   "url": "https://madewithjev.com/builds/jev-router-skill",
+   "sub": "A Claude Code and Codex skill that picks the model for a prompt.",
+   "fit": 2.17,
+   "rllm": 0.17,
+   "multi": 0.13,
+   "esc": 0.1
+  },
+  {
+   "name": "From Jev to Laya in an AI video pipeline",
+   "url": "https://madewithjev.com/builds/jev-to-laya-switch",
+   "sub": "A developer moves the decision layer from Jev to Laya.",
+   "fit": 2.02,
+   "rllm": 0.71,
+   "multi": 0.61,
+   "esc": 0.13
+  },
+  {
+   "name": "pi-jev-router",
+   "url": "https://madewithjev.com/builds/philippdubach-pi-jev-router",
+   "sub": "A Pareto-optimal OpenRouter router for Pi, decided by Jev.",
+   "fit": 1.98,
+   "rllm": 0.17,
+   "multi": 0.21,
+   "esc": 0.08
+  },
+  {
+   "name": "On-device audio, no LLM in the loop",
+   "url": "https://madewithjev.com/builds/on-device-audio-pipeline",
+   "sub": "Jev makes about 20 decisions in one call and picks which local model runs.",
+   "fit": 1.94,
+   "rllm": 0.83,
+   "multi": 0.59,
+   "esc": 0.08
+  },
+  {
+   "name": "Strike Robot wires Jev into a Physical AI stack",
+   "url": "https://madewithjev.com/builds/strike-robot-physical-ai-stack",
+   "sub": "An autonomy architecture change, not a model release.",
+   "fit": 2.02,
+   "rllm": 0.25,
+   "multi": 0.09,
+   "esc": 0.85
+  }
+ ],
+ "insufficient_context": [
+  {
+   "count": 84,
+   "mean_fit": 0.76
+  },
+  {
+   "name": "On \u201ckilled it\u201d claims and retweets",
+   "url": "https://madewithjev.com/builds/killed-it-claims-and-retweets",
+   "sub": "The marketing is expected; the unread retweets are the problem.",
+   "fit": 2.38,
+   "rllm": 0.17,
+   "multi": 0.11,
+   "esc": 0.05
+  },
+  {
+   "name": "Reading the System One blog with an assistant",
+   "url": "https://madewithjev.com/builds/reading-the-system-one-blog",
+   "sub": "Gemini Enterprise used to break the articles down.",
+   "fit": 1.83,
+   "rllm": 0.06,
+   "multi": 0.11,
+   "esc": 0.06
+  },
+  {
+   "name": "Typed Judgment AI Use Case Demos",
+   "url": "https://madewithjev.com/community/typesafe-use-cases",
+   "sub": "Runnable demos of typed judgments replacing hand-rolled parsing or keyword matching for games, support tickets, and fact-checking",
+   "fit": 1.84,
+   "rllm": 0.4,
+   "multi": 0.29,
+   "esc": 0.19
+  },
+  {
+   "name": "json-render",
+   "url": "https://madewithjev.com/builds/json-render",
+   "sub": "Vercel Labs\u2019 generative UI framework, with a Jev composer behind a flag.",
+   "fit": 1.41,
+   "rllm": 0.12,
+   "multi": 0.16,
+   "esc": 0.12
+  },
+  {
+   "name": "Eleven trending Jev repos",
+   "url": "https://madewithjev.com/builds/trending-jev-repos",
+   "sub": "The Jev repositories moving fastest on GitHub, in one post.",
+   "fit": 1.22,
+   "rllm": 0.21,
+   "multi": 0.1,
+   "esc": 0.06
+  },
+  {
+   "name": "jev-reviewer",
+   "url": "https://madewithjev.com/builds/jev-reviewer",
+   "sub": "Systematic-review data from trial reports, every answer a verbatim quote.",
+   "fit": 1.46,
+   "rllm": 0.16,
+   "multi": 0.4,
+   "esc": 0.06
+  }
+ ],
+ "game_control": [
+  {
+   "count": 60,
+   "mean_fit": 1.0
+  },
+  {
+   "name": "Chess, once free and once filtered",
+   "url": "https://madewithjev.com/builds/chess-with-a-defence-filter",
+   "sub": "Left to decide alone it lost; with an attack-defence filter it won.",
+   "fit": 2.36,
+   "rllm": 0.11,
+   "multi": 0.17,
+   "esc": 0.11
+  },
+  {
+   "name": "jev-drone",
+   "url": "https://madewithjev.com/builds/jev-drone",
+   "sub": "A simulated drone that asks Jev for a judgment 2.5 times a second.",
+   "fit": 1.95,
+   "rllm": 0.3,
+   "multi": 0.65,
+   "esc": 0.19
+  },
+  {
+   "name": "TypeSafe Mario",
+   "url": "https://madewithjev.com/builds/typesafe-mario",
+   "sub": "Jev picks NES controller inputs from telemetry, never from pixels.",
+   "fit": 1.81,
+   "rllm": 0.12,
+   "multi": 0.07,
+   "esc": 0.05
+  },
+  {
+   "name": "Jev plays Puyo Puyo",
+   "url": "https://madewithjev.com/builds/jev-plays-puyo-puyo",
+   "sub": "Four questions a move: which phase, then the best landing.",
+   "fit": 1.74,
+   "rllm": 0.09,
+   "multi": 0.94,
+   "esc": 0.04
+  },
+  {
+   "name": "An open typed-decision classifier",
+   "url": "https://madewithjev.com/builds/typed-decision-classification-system",
+   "sub": "Yes/no, a score or a choice, with no chat and no generation.",
+   "fit": 1.91,
+   "rllm": 0.66,
+   "multi": 0.12,
+   "esc": 0.08
+  },
+  {
+   "name": "Adaptive Traffic Signal Control vs Fixed Timing Simulation",
+   "url": "https://madewithjev.com/community/i-wanted-to-understand-where-jev-actually-helps",
+   "sub": "Simulation compares adaptive signal decisions using queue sizes and wait times against a fixed 8-second cycle across varying traffic conditions",
+   "fit": 1.54,
+   "rllm": 0.07,
+   "multi": 0.1,
+   "esc": 0.04
+  }
+ ],
+ "action_gate": [
+  {
+   "count": 21,
+   "mean_fit": 1.64
+  },
+  {
+   "name": "Jev blocks a $50,000 transfer",
+   "url": "https://madewithjev.com/builds/jev-blocks-transfer",
+   "sub": "95% irreversible risk and 94% sensitivity, so it refused.",
+   "fit": 2.52,
+   "rllm": 0.44,
+   "multi": 0.11,
+   "esc": 0.63
+  },
+  {
+   "name": "Jev decides whether Cursor wakes the model",
+   "url": "https://madewithjev.com/builds/jev-cursor-model-wake",
+   "sub": "A Noul, Choice and Score layer inside the Cursor loop.",
+   "fit": 2.41,
+   "rllm": 0.73,
+   "multi": 0.55,
+   "esc": 0.3
+  },
+  {
+   "name": "A local classifier instead of Jev",
+   "url": "https://madewithjev.com/builds/a-local-classifier-instead",
+   "sub": "Just as fast for the job, with a Python server holding the model.",
+   "fit": 2.17,
+   "rllm": 0.82,
+   "multi": 0.09,
+   "esc": 0.08
+  },
+  {
+   "name": "The Jev stack",
+   "url": "https://madewithjev.com/builds/the-jev-stack",
+   "sub": "One builder\u2019s agent stack, shared.",
+   "fit": 2.06,
+   "rllm": 0.3,
+   "multi": 0.35,
+   "esc": 0.86
+  },
+  {
+   "name": "pi-heed",
+   "url": "https://madewithjev.com/builds/pi-heed",
+   "sub": "Checks every side-effecting tool call against what you asked for.",
+   "fit": 1.91,
+   "rllm": 0.12,
+   "multi": 0.11,
+   "esc": 0.11
+  },
+  {
+   "name": "A usage router for Grok Bot",
+   "url": "https://madewithjev.com/builds/grokbot-jev-usage-router",
+   "sub": "Jev decides which route an agent takes before it spends anything.",
+   "fit": 1.89,
+   "rllm": 0.33,
+   "multi": 0.12,
+   "esc": 0.17
+  }
+ ],
+ "rate_rank": [
+  {
+   "count": 41,
+   "mean_fit": 1.63
+  },
+  {
+   "name": "Scoring educational video segments",
+   "url": "https://madewithjev.com/builds/jev-educational-video-scores",
+   "sub": "Jev scores segments of educational video.",
+   "fit": 2.38,
+   "rllm": 0.17,
+   "multi": 0.44,
+   "esc": 0.06
+  },
+  {
+   "name": "Kill My Idea",
+   "url": "https://madewithjev.com/builds/killmyidea",
+   "sub": "Describe a startup idea. Jev says kill it, fix it or ship it.",
+   "fit": 2.42,
+   "rllm": 0.23,
+   "multi": 0.63,
+   "esc": 0.1
+  },
+  {
+   "name": "Predictive spreadsheets",
+   "url": "https://madewithjev.com/builds/predictive-spreadsheets",
+   "sub": "Name a column and Jev fills in every row, about 100 ms each.",
+   "fit": 2.22,
+   "rllm": 0.22,
+   "multi": 0.1,
+   "esc": 0.08
+  },
+  {
+   "name": "An open-source chat copilot",
+   "url": "https://madewithjev.com/builds/chat-copilot-jev",
+   "sub": "Built at the JEV hackathon.",
+   "fit": 2.44,
+   "rllm": 0.48,
+   "multi": 0.71,
+   "esc": 0.15
+  },
+  {
+   "name": "Scoring competitor ads with Opus 5.5 and Jev",
+   "url": "https://madewithjev.com/builds/opus-jev-competitor-ads",
+   "sub": "Jev makes the ad judgments.",
+   "fit": 2.13,
+   "rllm": 0.07,
+   "multi": 0.91,
+   "esc": 0.06
+  },
+  {
+   "name": "Which exam questions come back",
+   "url": "https://madewithjev.com/builds/exam-question-predictor",
+   "sub": "80 real exam questions and 297 practice ones, ranked in 80 seconds.",
+   "fit": 2.08,
+   "rllm": 0.33,
+   "multi": 0.22,
+   "esc": 0.08
+  }
+ ],
+ "agent_next_step": [
+  {
+   "count": 46,
+   "mean_fit": 1.12
+  },
+  {
+   "name": "neo4jev",
+   "url": "https://madewithjev.com/builds/neo4jev",
+   "sub": "Walking a Neo4j graph one hop at a time, each hop a typed choice.",
+   "fit": 2.01,
+   "rllm": 0.2,
+   "multi": 0.48,
+   "esc": 0.06
+  },
+  {
+   "name": "Computer use without screenshots",
+   "url": "https://madewithjev.com/builds/computer-use-without-screenshots",
+   "sub": "On-device segmentation and OCR turn the screen into text for Jev.",
+   "fit": 1.8,
+   "rllm": 0.85,
+   "multi": 0.24,
+   "esc": 0.09
+  },
+  {
+   "name": "jev-ultrafast",
+   "url": "https://madewithjev.com/builds/jev-ultrafast",
+   "sub": "Browser Use\u2019s browser agent, with Jev choosing each next step.",
+   "fit": 1.76,
+   "rllm": 0.91,
+   "multi": 0.09,
+   "esc": 0.07
+  },
+  {
+   "name": "blink",
+   "url": "https://madewithjev.com/builds/blink",
+   "sub": "Codebase search by sending a hundred walkers through the file tree.",
+   "fit": 1.86,
+   "rllm": 0.51,
+   "multi": 0.4,
+   "esc": 0.05
+  },
+  {
+   "name": "solari-reflex",
+   "url": "https://madewithjev.com/builds/solari-reflex",
+   "sub": "A speed layer for computer use: one Jev decision per step.",
+   "fit": 1.7,
+   "rllm": 0.27,
+   "multi": 0.14,
+   "esc": 0.14
+  },
+  {
+   "name": "Stagehand on a remote browser",
+   "url": "https://madewithjev.com/builds/stagehand-remote-browser",
+   "sub": "Browser tasks for about a tenth of a cent each.",
+   "fit": 1.66,
+   "rllm": 0.13,
+   "multi": 0.34,
+   "esc": 0.08
+  }
+ ],
+ "memory_context": [
+  {
+   "count": 18,
+   "mean_fit": 1.54
+  },
+  {
+   "name": "Let Jev pick the memories, not the answer",
+   "url": "https://madewithjev.com/builds/jev-picks-the-memories",
+   "sub": "Candidates selected for Codex or Claude Code to read.",
+   "fit": 2.5,
+   "rllm": 0.21,
+   "multi": 0.16,
+   "esc": 0.11
+  },
+  {
+   "name": "Agent memory is usually one growing file",
+   "url": "https://madewithjev.com/builds/agent-memory-is-a-markdown-file",
+   "sub": "Loaded whole on every run, and Jev could cut that cheaply.",
+   "fit": 2.28,
+   "rllm": 0.22,
+   "multi": 0.11,
+   "esc": 0.08
+  },
+  {
+   "name": "Skill suggestion injects one skill",
+   "url": "https://madewithjev.com/builds/skill-suggestion-injects-one-skill",
+   "sub": "Jev decides which skill is relevant, so the rest stay out of context.",
+   "fit": 2.14,
+   "rllm": 0.18,
+   "multi": 0.08,
+   "esc": 0.06
+  },
+  {
+   "name": "fast-jev-compaction",
+   "url": "https://madewithjev.com/builds/fast-jev-compaction",
+   "sub": "Claude Code compaction that deletes instead of summarising.",
+   "fit": 1.85,
+   "rllm": 0.22,
+   "multi": 0.17,
+   "esc": 0.07
+  },
+  {
+   "name": "Beacon fixes a coding agent\u2019s memory",
+   "url": "https://madewithjev.com/builds/beacon-jev-memory",
+   "sub": "Jev on the memory decisions in a coding agent.",
+   "fit": 1.79,
+   "rllm": 0.15,
+   "multi": 0.1,
+   "esc": 0.22
+  },
+  {
+   "name": "dsh-jev-prune",
+   "url": "https://madewithjev.com/builds/dsh-jev-prune",
+   "sub": "Context compaction for DeepSeek Harness, judged by Jev.",
+   "fit": 1.78,
+   "rllm": 0.19,
+   "multi": 0.19,
+   "esc": 0.11
+  }
+ ],
+ "infra_tooling": [
+  {
+   "count": 47,
+   "mean_fit": 0.96
+  },
+  {
+   "name": "AnyJev",
+   "url": "https://madewithjev.com/builds/anyjev",
+   "sub": "Turn any LLM into a Jev-style decision model, with no training.",
+   "fit": 2.43,
+   "rllm": 0.08,
+   "multi": 0.34,
+   "esc": 0.16
+  },
+  {
+   "name": "Open Alternative to Jev",
+   "url": "https://madewithjev.com/builds/open-alternative-jev",
+   "sub": "Typed, calibrated decisions from any open-weights model, on your own GPU.",
+   "fit": 2.02,
+   "rllm": 0.22,
+   "multi": 0.1,
+   "esc": 0.3
+  },
+  {
+   "name": "LogJev",
+   "url": "https://madewithjev.com/builds/logjev",
+   "sub": "Text, images or audio in, choices and scores out of the logprobs.",
+   "fit": 1.97,
+   "rllm": 0.19,
+   "multi": 0.21,
+   "esc": 0.09
+  },
+  {
+   "name": "OpenJev",
+   "url": "https://madewithjev.com/builds/openjev",
+   "sub": "An open attempt at a Jev-class decision model.",
+   "fit": 1.79,
+   "rllm": 0.21,
+   "multi": 0.36,
+   "esc": 0.33
+  },
+  {
+   "name": "reflex",
+   "url": "https://madewithjev.com/builds/reflex",
+   "sub": "A small open decision model: state and typed questions in, probabilities out.",
+   "fit": 1.65,
+   "rllm": 0.17,
+   "multi": 0.26,
+   "esc": 0.23
+  },
+  {
+   "name": "jevk5",
+   "url": "https://madewithjev.com/builds/jevk5",
+   "sub": "An open-weight alternative to Jev, Apache-2.0.",
+   "fit": 1.67,
+   "rllm": 0.21,
+   "multi": 0.14,
+   "esc": 0.13
+  }
+ ],
+ "filter_relevance": [
+  {
+   "count": 41,
+   "mean_fit": 1.66
+  },
+  {
+   "name": "Jev Sift",
+   "url": "https://madewithjev.com/builds/jev-sift",
+   "sub": "Classify first, read selectively: an agent plugin and MCP tool.",
+   "fit": 2.79,
+   "rllm": 0.24,
+   "multi": 0.19,
+   "esc": 0.14
+  },
+  {
+   "name": "Only 47% of leads fit the ICP",
+   "url": "https://madewithjev.com/builds/lead-screening-605m-tokens",
+   "sub": "605M tokens of live campaigns screened with Jev.",
+   "fit": 2.58,
+   "rllm": 0.55,
+   "multi": 0.11,
+   "esc": 0.08
+  },
+  {
+   "name": "Tocsin",
+   "url": "https://madewithjev.com/builds/tocsin",
+   "sub": "22.8M log lines grouped into patterns, then one question each.",
+   "fit": 2.49,
+   "rllm": 0.32,
+   "multi": 0.07,
+   "esc": 0.16
+  },
+  {
+   "name": "jev() for PostgreSQL",
+   "url": "https://madewithjev.com/builds/postgres-jev-function",
+   "sub": "Search a table in plain language, with no index and no embeddings.",
+   "fit": 2.23,
+   "rllm": 0.28,
+   "multi": 0.14,
+   "esc": 0.07
+  },
+  {
+   "name": "Grok thinks, Jev decides",
+   "url": "https://madewithjev.com/builds/grok-thinks-jev-decides",
+   "sub": "Six questions asked, and only the good ones opened.",
+   "fit": 2.35,
+   "rllm": 0.84,
+   "multi": 0.87,
+   "esc": 0.14
+  },
+  {
+   "name": "Filtering WIP todos by meaning",
+   "url": "https://madewithjev.com/builds/wip-todo-filter",
+   "sub": "Finds the todos where revenue moved, or the work got stuck.",
+   "fit": 2.27,
+   "rllm": 0.18,
+   "multi": 0.2,
+   "esc": 0.08
+  }
+ ],
+ "benchmark_meta": [
+  {
+   "count": 21,
+   "mean_fit": 0.27
+  },
+  {
+   "name": "jev-calibrate",
+   "url": "https://madewithjev.com/builds/jev-calibrate",
+   "sub": "Tune your Jev questions against your own labels, then confirm on held-out data.",
+   "fit": 1.4,
+   "rllm": 0.15,
+   "multi": 0.27,
+   "esc": 0.23
+  },
+  {
+   "name": "Jev Capability Atlas",
+   "url": "https://madewithjev.com/builds/jev-capability-atlas",
+   "sub": "Where Jev holds up and where it breaks, with real API receipts.",
+   "fit": 1.25,
+   "rllm": 0.12,
+   "multi": 0.23,
+   "esc": 0.08
+  },
+  {
+   "name": "jev-acento",
+   "url": "https://madewithjev.com/builds/jev-acento",
+   "sub": "A pre-registered audit of how Jev handles Spanish.",
+   "fit": 0.6,
+   "rllm": 0.14,
+   "multi": 0.17,
+   "esc": 0.2
+  },
+  {
+   "name": "jev-evaluation",
+   "url": "https://madewithjev.com/builds/jev-evaluation",
+   "sub": "Nine experiments and 28 predictions, all fixed before any data.",
+   "fit": 0.43,
+   "rllm": 0.1,
+   "multi": 0.28,
+   "esc": 0.07
+  },
+  {
+   "name": "awesome-jev-robustness",
+   "url": "https://madewithjev.com/builds/awesome-jev-robustness",
+   "sub": "Tests, calibration audits and failure-mode studies of Jev.",
+   "fit": 0.31,
+   "rllm": 0.14,
+   "multi": 0.22,
+   "esc": 0.35
+  },
+  {
+   "name": "Jev against Laya, a smoke test",
+   "url": "https://madewithjev.com/builds/jev-vs-laya-smoke-test",
+   "sub": "Accuracy, calibration, latency and cost per decision, side by side.",
+   "fit": 0.18,
+   "rllm": 0.21,
+   "multi": 0.09,
+   "esc": 0.11
+  }
+ ],
+ "verify_check": [
+  {
+   "count": 26,
+   "mean_fit": 1.59
+  },
+  {
+   "name": "ESG Disclosure Desk checks sustainability claims against evidence",
+   "url": "https://madewithjev.com/community/antigravitysoham-eng-esg-disclosure-desk",
+   "sub": "Validates each claim in a sustainability report against its underlying evidence records and flags disagreements across GRI, ESRS, BRSR, and ISSB",
+   "fit": 2.3,
+   "rllm": 0.2,
+   "multi": 0.31,
+   "esc": 0.17
+  },
+  {
+   "name": "jev-spec",
+   "url": "https://madewithjev.com/builds/jev-spec",
+   "sub": "Checks generated code against the specification that asked for it.",
+   "fit": 2.21,
+   "rllm": 0.18,
+   "multi": 0.2,
+   "esc": 0.13
+  },
+  {
+   "name": "SemDecide",
+   "url": "https://madewithjev.com/builds/semdecide",
+   "sub": "grep for meaning and jq for judgment, with a Unix exit code.",
+   "fit": 2.42,
+   "rllm": 0.22,
+   "multi": 0.15,
+   "esc": 0.41
+  },
+  {
+   "name": "Finding errors in AI drafts",
+   "url": "https://madewithjev.com/builds/jev-ai-draft-errors",
+   "sub": "Jev used to spot potential mistakes in a draft.",
+   "fit": 2.04,
+   "rllm": 0.19,
+   "multi": 0.14,
+   "esc": 0.12
+  },
+  {
+   "name": "Ticket triage with Jev in the loop",
+   "url": "https://madewithjev.com/builds/ticket-triage-jev-pattern",
+   "sub": "Jev asks where to look, then flags test gaps after the diff.",
+   "fit": 2.41,
+   "rllm": 0.09,
+   "multi": 0.13,
+   "esc": 0.11
+  },
+  {
+   "name": "slop-grader",
+   "url": "https://madewithjev.com/builds/slop-grader-cli",
+   "sub": "A CLI that audits text against your own rulesets.",
+   "fit": 2.04,
+   "rllm": 0.29,
+   "multi": 0.14,
+   "esc": 0.09
+  }
+ ],
+ "market_signal": [
+  {
+   "count": 12,
+   "mean_fit": 1.16
+  },
+  {
+   "name": "$17,831 in the first night",
+   "url": "https://madewithjev.com/builds/polymarket-bot-17k",
+   "sub": "A Jev Polymarket bot built by a student in Japan.",
+   "fit": 1.73,
+   "rllm": 0.45,
+   "multi": 0.14,
+   "esc": 0.52
+  },
+  {
+   "name": "Clawby re-scores four dimensions every ten minutes",
+   "url": "https://madewithjev.com/builds/clawby-four-dimension-reeval",
+   "sub": "Technical, liquidity, sentiment and risk, re-judged on a ten-minute loop.",
+   "fit": 1.8,
+   "rllm": 0.37,
+   "multi": 0.54,
+   "esc": 0.16
+  },
+  {
+   "name": "Fewer inputs, better performance",
+   "url": "https://madewithjev.com/builds/jev-backtest-fewer-inputs",
+   "sub": "A Jev backtest on cutting the input down.",
+   "fit": 1.48,
+   "rllm": 0.1,
+   "multi": 0.09,
+   "esc": 0.03
+  },
+  {
+   "name": "jev-trader",
+   "url": "https://madewithjev.com/builds/jev-trader",
+   "sub": "A trading bot that places an order in every 300 ms block.",
+   "fit": 1.25,
+   "rllm": 0.14,
+   "multi": 0.1,
+   "esc": 0.09
+  },
+  {
+   "name": "A Kalshi BTC bot on a 15-minute clock",
+   "url": "https://madewithjev.com/builds/kalshi-btc-trading-bot",
+   "sub": "A Bitcoin trading bot on Kalshi built with Jev.",
+   "fit": 0.99,
+   "rllm": 0.11,
+   "multi": 0.11,
+   "esc": 0.07
+  },
+  {
+   "name": "jevocks",
+   "url": "https://madewithjev.com/builds/jevocks",
+   "sub": "A stock terminal: Valyu brings the evidence, Jev gives the status.",
+   "fit": 1.26,
+   "rllm": 0.1,
+   "multi": 0.19,
+   "esc": 0.1
+  }
+ ],
+ "compare_match": [
+  {
+   "count": 10,
+   "mean_fit": 1.6
+  },
+  {
+   "name": "Support answers in a Mac app",
+   "url": "https://madewithjev.com/builds/mac-app-support-answers",
+   "sub": "Jev reads the built-in manual and picks the article that answers the user.",
+   "fit": 2.32,
+   "rllm": 0.39,
+   "multi": 0.11,
+   "esc": 0.16
+  },
+  {
+   "name": "An A/B test against 4,000 personas",
+   "url": "https://madewithjev.com/builds/persona-ab-test",
+   "sub": "Two launch tweets, voted on by survey respondents, in twelve seconds.",
+   "fit": 2.02,
+   "rllm": 0.29,
+   "multi": 0.15,
+   "esc": 0.05
+  },
+  {
+   "name": "400 companies matched to one candidate",
+   "url": "https://madewithjev.com/builds/job-match-prediction",
+   "sub": "Predicts which jobs a candidate is most likely to get, for $0.0005.",
+   "fit": 2.24,
+   "rllm": 0.21,
+   "multi": 0.32,
+   "esc": 0.1
+  },
+  {
+   "name": "A smart 404 page",
+   "url": "https://madewithjev.com/builds/smart-404-page",
+   "sub": "Corrects typos and redirects the visitor.",
+   "fit": 1.7,
+   "rllm": 0.12,
+   "multi": 0.11,
+   "esc": 0.11
+  },
+  {
+   "name": "Internal linking tool",
+   "url": "https://madewithjev.com/builds/internal-link-tool",
+   "sub": "Free tool: Jev classifies the pages and picks which ones link to which.",
+   "fit": 1.62,
+   "rllm": 0.31,
+   "multi": 0.26,
+   "esc": 0.11
+  },
+  {
+   "name": "Intent-based search in a Chrome extension",
+   "url": "https://madewithjev.com/builds/intent-search-chrome-extension",
+   "sub": "Search by what you meant, with Jev picking the match.",
+   "fit": 1.45,
+   "rllm": 0.13,
+   "multi": 0.11,
+   "esc": 0.11
+  }
+ ],
+ "safety_abuse": [
+  {
+   "count": 12,
+   "mean_fit": 1.61
+  },
+  {
+   "name": "Fraud detection with Jev and Kimi K3",
+   "url": "https://madewithjev.com/builds/fraud-detection-jev-kimi",
+   "sub": "Jev sorts 100 emails in 1.42 s and sends the unsure ones to Kimi K3.",
+   "fit": 2.53,
+   "rllm": 0.6,
+   "multi": 0.54,
+   "esc": 0.97
+  },
+  {
+   "name": "A phishing message detector",
+   "url": "https://madewithjev.com/builds/phishing-detector",
+   "sub": "TypeSafe Jev checks messages for phishing.",
+   "fit": 2.29,
+   "rllm": 0.15,
+   "multi": 0.1,
+   "esc": 0.11
+  },
+  {
+   "name": "jevmod",
+   "url": "https://madewithjev.com/builds/jevmod",
+   "sub": "Moderation with a probability per category and thresholds you set.",
+   "fit": 2.08,
+   "rllm": 0.27,
+   "multi": 0.14,
+   "esc": 0.55
+  },
+  {
+   "name": "mastra-jev-moderation",
+   "url": "https://madewithjev.com/builds/mastra-jev-moderation",
+   "sub": "Input moderation for Mastra agents in one file.",
+   "fit": 1.92,
+   "rllm": 0.18,
+   "multi": 0.1,
+   "esc": 0.11
+  },
+  {
+   "name": "Jev Anti-Spam Bot",
+   "url": "https://madewithjev.com/builds/jev-antispam-bot",
+   "sub": "A Telegram bot that deletes only the spam Jev is sure about.",
+   "fit": 1.81,
+   "rllm": 0.2,
+   "multi": 0.86,
+   "esc": 0.85
+  },
+  {
+   "name": "twitter-jev-guard",
+   "url": "https://madewithjev.com/builds/twitter-jev-guard",
+   "sub": "Low-quality, spam and ad posts get a translucent watermark.",
+   "fit": 1.53,
+   "rllm": 0.3,
+   "multi": 0.11,
+   "esc": 0.09
+  }
+ ],
+ "route_task": [
+  {
+   "count": 6,
+   "mean_fit": 1.53
+  },
+  {
+   "name": "A Slack agent, twice as fast",
+   "url": "https://madewithjev.com/builds/slack-agent-skill-routing",
+   "sub": "Jev picks the skill, tool and parameters before the agent starts.",
+   "fit": 2.25,
+   "rllm": 0.53,
+   "multi": 0.12,
+   "esc": 0.06
+  },
+  {
+   "name": "Jev inside a telemarketing AI",
+   "url": "https://madewithjev.com/builds/telemarketing-ai-with-jev",
+   "sub": "Built on the GPT Live API, with the decisions moved to Jev.",
+   "fit": 1.94,
+   "rllm": 0.25,
+   "multi": 0.44,
+   "esc": 0.18
+  },
+  {
+   "name": "jev-mcp-dispatcher",
+   "url": "https://madewithjev.com/builds/jev-mcp-dispatcher",
+   "sub": "Plain-language MCP tool calls with no LLM at all, only Jev.",
+   "fit": 1.46,
+   "rllm": 0.64,
+   "multi": 0.18,
+   "esc": 0.07
+  },
+  {
+   "name": "jev-tool-router",
+   "url": "https://madewithjev.com/builds/jev-tool-router",
+   "sub": "Picks the MCP tool for Codex, instead of listing them all.",
+   "fit": 1.43,
+   "rllm": 0.11,
+   "multi": 0.11,
+   "esc": 0.08
+  },
+  {
+   "name": "home-assistant-typesafe",
+   "url": "https://madewithjev.com/builds/home-assistant-typesafe",
+   "sub": "Home Assistant routes what you said through Jev, not an LLM.",
+   "fit": 1.19,
+   "rllm": 0.78,
+   "multi": 0.11,
+   "esc": 0.12
+  },
+  {
+   "name": "Jev Code Camp Hands-On Lessons for AI Decisions",
+   "url": "https://madewithjev.com/community/jev-code-camp-openjev",
+   "sub": "Interactive course teaching Choice, Score, and Noul through hands-on exercises and a ticket triage workflow",
+   "fit": 0.89,
+   "rllm": 0.18,
+   "multi": 0.29,
+   "esc": 0.24
+  }
+ ],
+ "multi_label": [
+  {
+   "count": 2,
+   "mean_fit": 1.83
+  },
+  {
+   "name": "Jev PR Labeler",
+   "url": "https://madewithjev.com/builds/jev-pr-labeler",
+   "sub": "GitHub PR labels chosen by Jev, with size measured as scope, not lines.",
+   "fit": 1.88,
+   "rllm": 0.05,
+   "multi": 0.21,
+   "esc": 0.11
+  },
+  {
+   "name": "Auto-tagging in the interface",
+   "url": "https://madewithjev.com/builds/jev-auto-tagging",
+   "sub": "Gustav Ekerot: the interface tags the item while you are still typing.",
+   "fit": 1.78,
+   "rllm": 0.2,
+   "multi": 0.11,
+   "esc": 0.08
+  }
+ ]
+}
