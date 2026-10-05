@@ -4,7 +4,9 @@
 The downstream repository is a generated mirror of what is pushed to the canonical GitHub
 repository's main branch, never of local commits or files. Its main branch always carries that
 tree; when its history has diverged, a commit with that tree is added on top of it, so downstream
-history is preserved.
+history is preserved. Top-level paths in EXCLUDED (research notes) are never published: the mirror gets
+the canonical tree without them, always as a new commit on its own history, so canonical history that
+holds them is never pushed downstream.
 Usage: sync_the_build_loop.py [--check] [--remote URL] [--canonical URL] [--source-ref REF]"""
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from typing import Optional
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REMOTE = "https://github.com/The-Build-Loop/classifier-skill.git"
 CANONICAL_REMOTE = "https://github.com/clark-mackey/classifier-skill.git"
+EXCLUDED = ("context",)
 
 
 def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -43,6 +46,16 @@ def canonical_commit(canonical: str, source_ref: Optional[str]) -> str:
     return commit
 
 
+def published_tree(source_tree: str) -> str:
+    """The canonical tree without the EXCLUDED top-level entries."""
+    entries = git("ls-tree", source_tree).stdout.splitlines()
+    kept = [line for line in entries if line.split("\t", 1)[1] not in EXCLUDED]
+    if len(kept) == len(entries):
+        return source_tree
+    return subprocess.run(["git", "-C", str(ROOT), "mktree"], input="\n".join(kept) + "\n", check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
 def remote_state(remote: str) -> tuple[Optional[str], Optional[str]]:
     listing = git("ls-remote", "--heads", remote, "main", check=False)
     if listing.returncode:
@@ -54,14 +67,17 @@ def remote_state(remote: str) -> tuple[Optional[str], Optional[str]]:
             git("rev-parse", "FETCH_HEAD^{tree}").stdout.strip())
 
 
-def publication_commit(source_commit: str, source_tree: str, downstream_commit: Optional[str]) -> str:
-    if downstream_commit is None:
-        return source_commit
-    if git("merge-base", "--is-ancestor", downstream_commit, source_commit, check=False).returncode == 0:
+def publication_commit(source_commit: str, tree: str, downstream_commit: Optional[str]) -> str:
+    """Fast-forward to the canonical commit only when nothing is excluded from it; otherwise add a commit with
+    the published tree, so excluded paths in canonical history never reach the mirror."""
+    canonical_tree = git("rev-parse", f"{source_commit}^{{tree}}").stdout.strip()
+    if tree == canonical_tree and (downstream_commit is None or git(
+            "merge-base", "--is-ancestor", downstream_commit, source_commit, check=False).returncode == 0):
         return source_commit
     subject = git("show", "-s", "--format=%s", source_commit).stdout.strip()
     message = f"{subject}\n\nCanonical-Commit: {source_commit}"
-    return git("commit-tree", source_tree, "-p", downstream_commit, "-m", message).stdout.strip()
+    parents = ["-p", downstream_commit] if downstream_commit else []
+    return git("commit-tree", tree, *parents, "-m", message).stdout.strip()
 
 
 def main() -> int:
@@ -73,7 +89,7 @@ def main() -> int:
     args = parser.parse_args()
 
     source_commit = canonical_commit(args.canonical, args.source_ref)
-    source_tree = git("rev-parse", f"{source_commit}^{{tree}}").stdout.strip()
+    source_tree = published_tree(git("rev-parse", f"{source_commit}^{{tree}}").stdout.strip())
     downstream_commit, downstream_tree = remote_state(args.remote)
 
     if downstream_tree == source_tree:

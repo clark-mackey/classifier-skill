@@ -83,6 +83,6 @@ Other skills can call `scripts/jev_decide.py` or `scripts/classify_items.py` dir
 
 ## Distribution
 
-This repository is the canonical source. `The-Build-Loop/classifier-skill` is a generated mirror, not a second authoring source; do not edit it directly. It mirrors only what is pushed to this repository's `main` on GitHub, never local commits or files. After pushing here, run `python3 scripts/sync_the_build_loop.py` to publish it, or add `--check` to report drift without pushing. The publisher keeps any downstream history and adds a commit carrying the canonical tree on top of it.
+This repository is the canonical source. `The-Build-Loop/classifier-skill` is a generated mirror, not a second authoring source; do not edit it directly. It mirrors only what is pushed to this repository's `main` on GitHub, never local commits or files. After pushing here, run `python3 scripts/sync_the_build_loop.py` to publish it, or add `--check` to report drift without pushing. The publisher keeps any downstream history and adds a commit carrying the canonical tree on top of it. It leaves out `context/` (research notes): the mirror gets the tree without it, as a new commit on the mirror's own history, so canonical history that holds those notes is never pushed there.
 
 - [MIT License](LICENSE)

@@ -546,8 +546,27 @@ class SyncTheBuildLoop(unittest.TestCase):
             self.assertEqual(self.sync(remote).returncode, 0)
             published = self.git("--git-dir", remote, "rev-parse", "main")
             self.assertEqual(self.git("--git-dir", remote, "rev-parse", "main^"), divergent)
-            canonical_tree = self.git("--git-dir", self.canonical, "rev-parse", "main^{tree}")
-            self.assertEqual(self.git("--git-dir", remote, "rev-parse", f"{published}^{{tree}}"), canonical_tree)
+            self.assert_published_without_context(remote, published)
+
+    def assert_published_without_context(self, remote, published):
+        """The mirror holds the canonical tree minus context/, and no canonical commit is in its history."""
+        names = set(self.git("--git-dir", remote, "ls-tree", "--name-only", published).splitlines())
+        canonical = set(self.git("--git-dir", self.canonical, "ls-tree", "--name-only", "main").splitlines())
+        self.assertEqual(names, canonical - {"context"})
+        self.assertNotEqual(self.git("--git-dir", remote, "rev-list", "--count", published),
+                            self.git("--git-dir", self.canonical, "rev-list", "--count", "main"))
+        for path in ("SKILL.md", "scripts/jev_decide.py"):
+            self.assertEqual(self.git("--git-dir", remote, "rev-parse", f"{published}:{path}"),
+                             self.git("--git-dir", self.canonical, "rev-parse", f"main:{path}"))
+
+    def test_first_publish_carries_no_canonical_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            remote = str(Path(tmp) / "downstream.git")
+            self.git("init", "--bare", "--quiet", "-b", "main", remote)
+            self.assertEqual(self.sync(remote).returncode, 0)
+            published = self.git("--git-dir", remote, "rev-parse", "main")
+            self.assertEqual(self.git("--git-dir", remote, "rev-list", "--count", published), "1")
+            self.assert_published_without_context(remote, published)
 
 
 class CallerContract(unittest.TestCase):
