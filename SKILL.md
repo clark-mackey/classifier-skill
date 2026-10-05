@@ -37,7 +37,7 @@ Reshape: <original task in one line>
 
 Put the same note in the request as `"reshape": {"task": ..., "recipe": ..., "offloaded": ..., "kept_for_llm": ...}`, where `recipe` is a name from the recipe table below or `custom`; a calling skill adds `"caller": "<its name>"`. The script strips it before sending and records it in the call log.
 
-To have the skill offered when another skill hands per-item judgment to a sub-agent, wire the nudge hook in [references/hooks.md](references/hooks.md).
+To have the skill offered when another skill hands per-item judgment to a sub-agent, or when a tool result returns a long list of terms or findings, wire the nudge hooks in [references/hooks.md](references/hooks.md).
 
 ## Classify by sorting cards into piles
 

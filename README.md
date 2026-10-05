@@ -69,7 +69,7 @@ export OPENROUTER_API_KEY
 
 Start your agent fresh from that environment so it discovers the skill and receives the variable. `agents/openai.yaml` is optional Codex display metadata; other agents ignore it.
 
-Optional: `hooks/nudge_classifier.py` is a Claude Code `PreToolUse` hook that adds a one-line suggestion to a sub-agent's prompt when that sub-agent is about to judge many items, so domain skills that delegate per-item work still get offered the classifier. It calls no model and never blocks. Wiring and measurement are in `references/hooks.md`; it is not enabled by installing the skill.
+Optional: `hooks/nudge_classifier.py` is a Claude Code `PreToolUse` hook that adds a one-line suggestion to a sub-agent's prompt when that sub-agent is about to judge many items, so domain skills that delegate per-item work still get offered the classifier. `hooks/nudge_list_result.py` is its main-session partner, a `PostToolUse` hook that adds one note when a tool result returns 20 or more search terms, keywords, findings or similar rows. Both call no model and never block. Wiring and measurement are in `references/hooks.md`; neither is enabled by installing the skill.
 
 ## Notes
 

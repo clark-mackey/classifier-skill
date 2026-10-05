@@ -822,6 +822,55 @@ class NudgeHook(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout), (0, ""))
 
 
+class ListResultNudge(unittest.TestCase):
+    HOOK = SCRIPTS.parent / "hooks/nudge_list_result.py"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()  # isolates the once-per-session marker files
+        self.addCleanup(self.tmp.cleanup)
+
+    def fire(self, response, tool="mcp__google-ads__search_terms_report", tool_input=None, session="s1", env=None):
+        event = json.dumps({"session_id": session, "tool_name": tool, "tool_input": tool_input or {},
+                            "tool_response": response})
+        result = subprocess.run([sys.executable, str(self.HOOK)], input=event, capture_output=True, text=True,
+                                env={**os.environ, "TMPDIR": self.tmp.name, **(env or {})})
+        self.assertEqual(result.returncode, 0)
+        return json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"] if result.stdout else None
+
+    terms = [{"searchTermView": {"searchTerm": f"term {i}"}, "metrics": {"cost": i}} for i in range(25)]
+
+    def test_notes_long_lists_once_per_tool_per_session(self):
+        blocks = [{"type": "text", "text": json.dumps({"rows": self.terms})}]
+        note = self.fire(blocks)
+        self.assertIn("[classifier-nudge]", note)
+        self.assertIn("25 rows", note)
+        self.assertIsNone(self.fire(blocks))  # same tool, same session
+        self.assertIsNotNone(self.fire(blocks, session="s2"))
+        tsv = "keyword\tclicks\n" + "\n".join(f"kw {i}\t{i}" for i in range(30))
+        self.assertIn("30 rows", self.fire({"stdout": tsv, "stderr": ""}, tool="Bash"))
+        self.assertIsNotNone(self.fire({"file": {"content": tsv}}, tool="Read",
+                                       tool_input={"file_path": "/x/audit.tsv"}))
+
+    def test_stays_silent(self):
+        short = [{"type": "text", "text": json.dumps(self.terms[:19])}]
+        self.assertIsNone(self.fire(short))
+        # long lists with nothing to judge: metric histories, tables without a judged column
+        history = [{"date": f"2026-09-{i:02d}", "clicks": i} for i in range(1, 31)]
+        self.assertIsNone(self.fire([{"type": "text", "text": json.dumps(history)}], session="s3"))
+        self.assertIsNone(self.fire({"stdout": "\n".join(f"/page-{i}\t200" for i in range(30))}, tool="Bash"))
+        self.assertIsNone(self.fire({"stdout": "\n".join(f"line {i}" for i in range(50))}, tool="Bash"))
+        self.assertIsNone(self.fire(self.terms, tool="Read", tool_input={"file_path": "/x/app.py"}))
+        self.assertIsNone(self.fire(self.terms, tool="Edit"))
+        self.assertIsNone(self.fire(self.terms, tool="Bash",
+                                    tool_input={"command": "python3 scripts/jev_decide.py --batch r.jsonl"}))
+        self.assertIsNone(self.fire(self.terms, env={"CLASSIFIER_NUDGE": "off"}))
+        self.assertIsNone(self.fire(self.terms, env={"MODEL_WORKER_LEAF": "1"}))
+
+    def test_fails_open_on_bad_input(self):
+        result = subprocess.run([sys.executable, str(self.HOOK)], input="not json", capture_output=True, text=True)
+        self.assertEqual((result.returncode, result.stdout), (0, ""))
+
+
 class ReviewFixes(unittest.TestCase):
     """Regression cases from the 2026-09-25 code-owl review of the redaction, size, and nudge changes."""
 

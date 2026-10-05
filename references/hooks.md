@@ -31,6 +31,30 @@ Wire it in `~/.claude/settings.json` (user-wide) or a project's `.claude/setting
 
 The sub-agent tool has been named both `Agent` and `Task`; the matcher covers both. Merge the entry into any existing `PreToolUse` list rather than replacing it.
 
+## Main-session list nudge
+
+`hooks/nudge_list_result.py` is a `PostToolUse` hook for the main session. Requests usually name the workflow ("run the weekly sweep", "audit the site"), not the per-item work inside it, so the skill's description has nothing to match. The list shows up later, in a tool result: a search-terms report, a keyword export, a table of audit findings. The hook reads each tool result, and when plain code finds 20 or more rows that carry a judged text field (a field named like search term, keyword, query, anchor, issue, finding, headline, title, description or review, in a JSON list of objects or in a tab or pipe table with a header), it adds one note, marked `[classifier-nudge]`, to the model's context.
+
+- It calls no model and sends nothing anywhere. It never blocks, and on any error it does nothing.
+- Lists with nothing to judge stay silent: metric histories, site or tool listings, tables without a judged column. Edit, sub-agent, search and skill tools are skipped, and a `Read` counts only for `.csv`, `.tsv`, `.json` and `.jsonl` files.
+- It fires at most once per tool per session (a marker file in the temp directory), skips the classifier's own runs, and stays silent for leaf workers (`MODEL_WORKER_LEAF=1`) or when `CLASSIFIER_NUDGE=off`.
+- Replayed over a week of real sessions, it fired in 12 of 91, mostly on search-term reports, keyword lists, shared negative lists and organic-keyword exports.
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*|Bash|Read|WebFetch",
+        "hooks": [
+          {"type": "command", "command": "python3 ~/.claude/skills/classifier-skill/hooks/nudge_list_result.py", "timeout": 5}
+        ]
+      }
+    ]
+  }
+}
+```
+
 ## Measuring it
 
-Every nudge leaves `[classifier-nudge]` in the sub-agent's transcript. Count nudges with `grep -rl "\[classifier-nudge\]" ~/.claude/projects/`, and compare with sessions that then ran `jev_decide.py`: a nudge that never leads to a call is either a false match (sharpen the hook's patterns) or a task the classifier should not take (leave it).
+Every nudge leaves `[classifier-nudge]` in the transcript (the sub-agent's prompt, or the main session's hook context). Count nudges with `grep -rl "\[classifier-nudge\]" ~/.claude/projects/`, and compare with sessions that then ran `jev_decide.py`: a nudge that never leads to a call is either a false match (sharpen the hook's patterns) or a task the classifier should not take (leave it).
