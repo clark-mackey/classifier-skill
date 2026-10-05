@@ -161,7 +161,7 @@ Handling: spot-check. The sort is stable across reruns, but the patterns come fr
 ### K. Assemble from parts
 | # | Pattern | In skill? | Exemplars |
 |---|---|---|---|
-| 36 | Personalize by picking k of N prebuilt parts per visitor or request, then ordering them in code | **NEW** | guide #18 (Chris Tate on X; Matthew Berman video at 7:49) |
+| 36 | Personalize by picking k of N prebuilt parts per visitor or request, then ordering them in code | yes (page-assembly) | guide #18 (Chris Tate on X; Matthew Berman video at 7:49) |
 
 Shape: one `choice` (or `noul`) per slot over a code-owned part library, or a `relevance` score per part followed by a top-k sort in code (context-select top-k). Ordering and layout rules stay in code. The classifier only chooses which parts to show.
 

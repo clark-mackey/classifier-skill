@@ -26,6 +26,7 @@ The deciding test: the answer is one of a finite set you can name in advance, it
 | Match against supplied candidates | `choice` over candidate ids | best link target, matching FAQ entry, entity resolution, legal moves or rows code generated |
 | Check a claim against a supplied source | citation-support recipe | supports / contradicts / no evidence |
 | Check a draft against requirements | one `noul` per requirement | covers each brief point, follows each style rule |
+| Screen copy sentence by sentence before it publishes | copy-screen recipe | unsupported claims, guaranteed results, testimonials without disclaimers, identifiable patient details in an ad or page |
 | Check LLM or agent output before it ships | `noul` per rule | answers the question, promises a refund, leaks internal data |
 | Screen input before an LLM reads it | `noul` or `choice` | jailbreak attempt, off-topic, needs a human |
 | Approve or block a proposed agent action | action-gate recipe | a shell command, file write, or outbound message before it runs |
@@ -39,6 +40,7 @@ The deciding test: the answer is one of a finite set you can name in advance, it
 | Walk a graph or tree one hop at a time | `choice` over the current node's neighbours | graph traversal, a file tree search, a decision tree |
 | Filter rows by meaning inside a query | `noul` per row, called from SQL or a CLI | a semantic WHERE clause, grep for meaning with an exit code |
 | Fill a column whose values are a known set | `choice` per row over the column's values | label every row of a sheet or table |
+| Assemble a page or reply from prebuilt parts | page-assembly recipe | landing-page hero and proof block per ad click, email content block per subscriber, approved answer block per chat topic |
 | Re-judge the same items on a schedule | fixed questions per item, compared across runs in code | watchlists, account health, market dimensions |
 
 ## Split
@@ -57,6 +59,7 @@ The deciding test: the answer is one of a finite set you can name in advance, it
 | Verify claims across sources | supported / contradicted / no evidence per claim, with the excerpt in `state` | retrieving the sources and extracting the claims |
 | Cascade to an LLM | settles the items it is sure about | only items below threshold go to the LLM or a person |
 | Label at scale, then audit | labels every item | an LLM or person grades a random sample; the agreement rate decides whether to trust the rest |
+| Clean a scraped or agent-produced list | keep / drop and kind per row, judged from the row's own title and snippet | code dedupes and drops templated rows; an LLM writes descriptions only for kept rows. Agent-written labels are not evidence until this pass confirms them |
 | Judge a huge repetitive set | one judgment per group | code groups near-identical items (log templates, normalized text) and applies each group's answer to its members |
 | Wrap an LLM step | before: where to look or whether to run; after: check the output | the LLM does the work in between |
 | Tune questions against known answers | answers on a labeled sample | calibrate recipe: code sweeps thresholds and confirms on held-out items |

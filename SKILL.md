@@ -1,13 +1,13 @@
 ---
 name: classifier-skill
-description: Use when a task means judging each of many items — tag, sort, filter, route, triage, check, score, rank, or dedupe a list — or when the user names Jev, TypeSafe, or classifier-skill. Reshapes that judgment into typed questions for a fast, cheap non-generative classifier (default TypeSafe Jev, via OpenRouter or TypeSafe directly) so the working LLM does not spend tokens on it. Not for a single quick judgment, for writing or open reasoning, or for local-only data unless a model runs on this machine.
+description: Use when a task means judging each of many items — tag, sort, filter, route, triage, check, score, rank, or dedupe a list — or picking among prebuilt options per visitor, request, or loop step, or when the user names Jev, TypeSafe, or classifier-skill. Reshapes that judgment into typed questions for a fast, cheap non-generative classifier (default TypeSafe Jev, via OpenRouter or TypeSafe directly) so the working LLM does not spend tokens on it. Not for a single quick judgment, for writing or open reasoning, or for local-only data unless a model runs on this machine.
 ---
 
 # Reshape judgment work for a classifier model
 
 Keep the current model as the working agent. The classifier (Jev by default) returns only probabilities over options you define; it never writes text. Use it for bounded, structured judgments, then act on the numbers in code. Reply in the user's language.
 
-Once work is reshaped, make a real script call. Never present `--dry-run`, the working model's opinion, or a fallback as the classifier's answer. Returned probabilities describe the classifier's distribution over the supplied options; they are not success rates or savings percentages.
+Once work is reshaped, make a real script call, unless the user asked for a dry run or design only: then stop at `--dry-run`, show the request, and do not label the items yourself. Never present `--dry-run`, the working model's opinion, or a fallback as the classifier's answer. Returned probabilities describe the classifier's distribution over the supplied options; they are not success rates or savings percentages.
 
 Treat "must stay on this machine", "local only", "no cloud", or "don't send it anywhere" as strictly local data. Send it only through Ollama with `--provider ollama`, or to another model server on this machine with `--provider compatible --local-only` (see [references/providers.md](references/providers.md)); otherwise report that the data cannot be sent and do not call. The Ollama provider is hard-limited to loopback. Every hosted provider, including a Hugging Face endpoint, is a cloud service.
 
@@ -21,7 +21,7 @@ A task qualifies when the answer is one of a finite set you can name in advance 
 2. Items become cards (`state`), decisions become questions, answer sets become piles or rubric levels.
 3. Run it, act on the answers in code, and hand back to the LLM or a person only what the classifier left undecided: flagged, `none_fit`, or below threshold.
 
-Once this skill is loaded for a list of 3 or more items, run the classifier. Do not answer the items from your own judgment instead; if the call fails, report the failure rather than substituting your answers.
+Once this skill is loaded for a list of 3 or more items, run the classifier (a dry run when the user asked for one). Do not answer the items from your own judgment instead; if the call fails, report the failure rather than substituting your answers.
 
 Show the reshape before calling, so it can be reviewed:
 
@@ -70,6 +70,8 @@ If the request matches a row, read that recipe in [references/recipes.md](refere
 | `calibrate` | tuning a request's criteria and thresholds against labeled examples before relying on it |
 | `catalog-lookup` | the right action depends on what exists in the caller's world (services, pages, owners): ask which entity the item is about, and let code pick the action |
 | `citation-support` | whether a source supports, contradicts, or ignores a claim |
+| `copy-screen` | checking each sentence of ads, pages, or replies against claim, testimonial, or privacy rules before publishing |
+| `page-assembly` | building a page, email, or reply from prebuilt parts chosen per visitor or request |
 | `search-intent` | classifying a query, keyword, or page by search intent |
 | `link-target` | picking an internal-link destination from candidates |
 | `brief-coverage` | whether a draft covers each point of a brief |
@@ -87,11 +89,15 @@ If the request matches a row, read that recipe in [references/recipes.md](refere
 - Ask about what an item describes, never about the card itself. A question such as "what kind of input is this?" gets answered from the format of `state` (JSON, prose), not the data the item describes; derive such facts in code or ask about content.
 - Keep "the facts do not say" out of `noul` criteria: folded into `false`, code cannot tell "no evidence" from "false". Ask a separate `choice` with `insufficient_context` when that difference matters.
 - Cards with only a title or a line of text land in `insufficient_context`. Enrich thin cards in code before the sort, or plan for a large leftover pile.
+- Questions about quality, concreteness, or completeness reward longer cards. When cards come from sources with different text lengths (one-line search results next to full write-ups), compare within a source, gate each source on its own question, or enrich cards to similar depth first.
+- State the frame of a question and its edge cases in the rules. "Which industry runs this?" and "which industry does this serve?" sort the same cards very differently; say which one you mean (for example, "work an agency does for a client counts as the client's industry").
 - `choice`: pick one option from a criteria object. For custom choices, always add `insufficient_context` (and `none_fit` for sorts) so unclear input is not forced onto the nearest label.
 - `noul`: probability from 0 to 1 that a statement is true. Criteria are optional; if given, use exactly the keys `true` and `false`.
 - `score`: position on an ordered rubric of at least two concrete string levels, lowest to highest.
 
 Keep exact rules, calculations, permissions, and actions in the working agent or deterministic code. The classifier supplies judgment, not authorization or generated prose. When writing routing code over its answers, give each action its own threshold `t` set by what a wrong answer costs (around 0.6 for harmless, 0.85–0.95 for costly or irreversible). For `noul`, act when P(true) ≥ t, skip when P(true) ≤ 1 − t, and send the band between to a person; for `choice` and `score`, act only when the returned `confidence` ≥ t, otherwise send to a person. Pass `--threshold t` and the script applies exactly this rule, adding `decisions` (question id → `act`, `skip`, or `human`, with any `review` reason forcing `human`); when actions need different thresholds, run with the strictest or apply the rule per action in code. A loop that calls the classifier repeatedly needs a call budget, and its success is checked against the real outcome, not against a "done" answer.
+
+When code combines several `score` answers into grades or tiers, expect the result to be top-heavy: value and volume read from short cards skew high. Reserve the top tier for answers that are both high and confident (for example, expected level near the top and `confidence` ≥ 0.7), and run the `calibrate` recipe before relying on any tier.
 
 ## Invoke
 
@@ -109,9 +115,9 @@ Every question needs non-empty `instructions`. Before sending, the script replac
 
 The script reaches Jev through `--provider openrouter` (`OPENROUTER_API_KEY`, pinned `typesafe/jev-1.13`) or `--provider typesafe` (`TYPESAFE_API_KEY`, pinned `jev-1.13.0`). Without the flag it uses `CLASSIFIER_PROVIDER`, else whichever hosted key is set, OpenRouter first. Each key is sent only to its own host. `--provider ollama` calls `http://127.0.0.1:11434/v1/systemone`, defaults to `nimble:9b`, needs Ollama 0.35 or later, needs no key, and refuses non-loopback endpoints even without `--local-only`. Ollama System One accepts supported decision models such as Nimble and Tev1; an arbitrary imported chat model or Winnow import is not automatically supported. `--provider compatible` reaches another server that speaks the same shapes and is also explicit-only. [references/providers.md](references/providers.md) covers configuration and calibration. Provider thresholds never transfer. The script retries briefly on rate limits and server errors, checks every answer against the questions asked, and fails loudly on malformed answers. Valid output gains a `review` object; `--dry-run` validates and prints the outgoing payload without sending it.
 
-**Many items, one template:** for 3 or more items (keywords, pages, cards), always use batch mode rather than separate calls: write one state per line to a JSONL file created with `mktemp` (never a fixed path such as `/tmp/x.jsonl`), pipe the request without `state`, and pass `--batch FILE`. It prints one JSON result per line (if a request fails after its retries, it stops there, keeps the lines already printed, and exits 1) and, on stderr, counts of flagged and invalid items, flags per question, and total cost. Report the counts and the flagged lines, not every line; with many questions per item, read the per-question counts, since one uncertain question flags the whole line.
+**Many items, one template:** for 3 or more items (keywords, pages, cards), always use batch mode rather than separate calls: write one state per line to a JSONL file created with `mktemp` (never a fixed path such as `/tmp/x.jsonl`), pipe the request without `state`, and pass `--batch FILE`. It prints one JSON result per line (if a request fails after its retries, it stops there, keeps the lines already printed, and exits 1) and, on stderr, counts of flagged and invalid items, flags per question, and total cost. Report the counts and the flagged lines, not every line; with many questions per item, read the per-question counts, since one uncertain question flags the whole line. A large batch (thousands of items with several questions each) can run longer than ten minutes: run it in the background with a long timeout, and write each run to a new output file so a stopped run never overwrites finished results.
 
-Report the selected answer, the runner-up and its probability, any `review` reasons, the response model, and the reported cost (TypeSafe's direct API reports tokens, not cost). Keep each item's full probabilities, not just the top pick, and keep the request you sent with the results so the sort can be repeated. Label results as the classifier's judgments: they are not user research and do not validate a design; check consequential structures with the people who will use them. End every classifier reply with one line, `Handling: <automate | spot-check | human review> — <reason>`, using the recipe's level when one applies:
+After a live call, report the selected answer, the runner-up and its probability, any `review` reasons, the response model, and the reported cost (TypeSafe's direct API reports tokens, not cost). Keep each item's full probabilities, not just the top pick, and keep the request you sent with the results so the sort can be repeated. Label results as the classifier's judgments: they are not user research and do not validate a design; check consequential structures with the people who will use them. After a dry run, report only the validated request: there are no answers, probabilities, or cost to report, and no `Handling:` line. End every reply to a live call with one line, `Handling: <automate | spot-check | human review> — <reason>`, using the recipe's level when one applies:
 - **Automate:** reversible, low-risk, facts complete, no `review` reasons.
 - **Spot-check:** acceptable but not proven on this kind of input.
 - **Human review:** any `review` reason, missing facts, or a material consequence. Medical, legal, and financial claims always get human review.

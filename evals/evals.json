@@ -290,6 +290,685 @@
         "The reply reports that fewer than 5 passages cleared the floor",
         "The reply ends with a Handling: line"
       ]
+    },
+    {
+      "id": 23,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u01784",
+      "prompt": "Our medspa gets about 300 calls a week. For each call transcript, decide whether the caller is asking about pricing, service fit, booking a new appointment, treatment prep, or changing a booking, so the call goes to the right person. Sample: 'Hi, how much is lip filler and do you have anything Saturday?' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "The request has a choice over the five intents plus an escape option, and an answer can carry more than one intent only if the reply says how (multi-label noul or a primary-intent choice)"
+      ]
+    },
+    {
+      "id": 24,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02064",
+      "prompt": "A law firm publishes blog posts and pages that sometimes quote client results. For every page draft, flag testimonial or result claims and whether a required disclaimer is present before it goes live. Sample paragraph: 'We recovered $2.1M for a client injured on I-75.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "recipes.md was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Testimonial claim is a noul question; disclaimer presence is a literal check in code; the two are combined in code"
+      ]
+    },
+    {
+      "id": 25,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02945",
+      "prompt": "We write hundreds of real estate listing descriptions a month. Before one is published, check it for fair-housing risk such as steering or protected-class language. Sample: 'Perfect for a young couple, quiet Christian neighborhood.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "recipes.md was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Publication is blocked or sent to a person on a risk flag; the classifier does not approve listings on its own"
+      ]
+    },
+    {
+      "id": 26,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02930",
+      "prompt": "Customers of our plumbing and HVAC company describe their problem in a web form. Decide for each one: emergency, same day, scheduled, or quote only, and whether they mention a safety hazard. Sample: 'Smell gas near the water heater, kids at home.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "A safety-hazard answer pages a person regardless of the urgency choice, decided in code"
+      ]
+    },
+    {
+      "id": 27,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02125",
+      "prompt": "Visitors type into our clinic website's search box. Route each search to the matching procedure page from our service menu (botox, filler, laser hair removal, chemical peel, microneedling), or flag it if it sounds urgent. Sample: 'my lip is swollen after filler yesterday'. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "The choice options are the supplied service menu plus none_fit or other, and urgency is a separate noul"
+      ]
+    },
+    {
+      "id": 28,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02007",
+      "prompt": "For each converting Google Ads query, pick which page on our site best answers it from our page catalog, or say no page exists so we can plan one. Catalog: /botox, /lip-filler, /laser-hair-removal, /pricing, /contact. Sample query: 'how long does lip filler last'. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "The choice options are the page catalog ids plus a no_page_exists option"
+      ]
+    },
+    {
+      "id": 29,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u01262",
+      "prompt": "Read each support email and classify it as billing, technical, account, general inquiry, or urgent, then route it to the right handler. We get about 2,000 a day. Sample: 'I was charged twice this month.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "A batch call is planned rather than one call per email"
+      ]
+    },
+    {
+      "id": 30,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u03652",
+      "prompt": "Every CSAT survey comment should be sorted into a fixable cause (wait time, wrong answer, tone, policy, product issue) so we can aggregate them for coaching. Sample: 'Agent was nice but the refund policy is ridiculous.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Counting and aggregating causes is done in code after the classifier answers"
+      ]
+    },
+    {
+      "id": 31,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02876",
+      "prompt": "We get 400 applicants per role. Score each resume against the role's required skills so we can shortlist. Required skills: Python, SQL, stakeholder communication. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Each required skill gets its own score question with described levels, and code weights and sorts"
+      ]
+    },
+    {
+      "id": 32,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02590",
+      "prompt": "Our nonprofit's donor replies pile up. For each reply decide: unsubscribe, question, pledge, complaint, thanks, or other, and flag any major-gift signal. Sample: 'Would love to talk about a larger gift for the new building.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Unsubscribe handling is acted on reliably: a high-confidence unsubscribe is automated, and a low-confidence one goes to a person"
+      ]
+    },
+    {
+      "id": 33,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u03643",
+      "prompt": "Support tickets sometimes contain pasted secrets. For each ticket body, decide whether it includes an API key, password, or card number so we can redact it. Sample: 'here is my key sk_live_51H... it is not working'. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Pattern-detectable secrets (key prefixes, card-number formats) are checked in code first; the classifier handles only what patterns miss"
+      ]
+    },
+    {
+      "id": 34,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u01826",
+      "prompt": "Before a law firm's ads run, classify each ad for compliant language and required fee disclosures. Sample: 'No win, no fee. Best injury lawyers in Ohio.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "recipes.md was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Each compliance rule is its own noul question rather than one overall compliant yes/no"
+      ]
+    },
+    {
+      "id": 35,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u00133",
+      "prompt": "We have 12,000 products and need each mapped to a Google Shopping product category. Sample: 'Women's waterproof hiking boot, size 8'. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "The large taxonomy is narrowed in code or split into levels (top-level category first) instead of one choice with thousands of options"
+      ]
+    },
+    {
+      "id": 36,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u01852",
+      "prompt": "Route each credit card dispute by category: unauthorized, billing error, quality issue, or fraud. Sample: 'I never received the item and the seller will not reply.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Disputes below the confidence threshold go to a person, not to the top choice"
+      ]
+    },
+    {
+      "id": 37,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02846",
+      "prompt": "Our dental office transcribes voicemails. Sort each one: new booking, reschedule, billing, test results, prescription refill, marketing call, or other. Sample: 'Hi, need to move my cleaning on Thursday.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "The request is a single choice question per voicemail with an other option"
+      ]
+    },
+    {
+      "id": 38,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02149",
+      "prompt": "Our WordPress logs have thousands of lines a day. Sort each log line as an attack probe, plugin error, theme warning, user error, or other so the dashboard groups them. Sample: 'GET /wp-login.php?action=register 404'. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Lines that a rule can classify (known paths, status codes) are handled in code before any call"
+      ]
+    },
+    {
+      "id": 39,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02680",
+      "prompt": "For each dependency release changelog entry, decide whether it is a breaking change, deprecation, security fix, feature, or patch, so patch and security updates can auto-merge. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Auto-merge happens only on a high-confidence patch or security answer; anything else goes to a person"
+      ]
+    },
+    {
+      "id": 40,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u03470",
+      "prompt": "Our newsroom wants a pre-publish check: for each sentence about a named person, does it accuse them of a crime, and does it state that as fact rather than allegation? Sample: 'Mayor Smith embezzled city funds.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "The two properties are separate noul questions, and code routes to legal review only when both are true"
+      ]
+    },
+    {
+      "id": 41,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u00197",
+      "prompt": "Our Minecraft server needs a chat filter. Every message, before it is shown, should be checked for harassment or grooming. It must decide within about 300 ms. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "The reply sets a latency budget and a fallback for late or failed calls"
+      ]
+    },
+    {
+      "id": 42,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u01950",
+      "prompt": "Before we add a negative keyword to a Google Ads account, check whether it would block any of the account's converting search terms by meaning, not just by string match. Candidate negative: 'cheap'. Converting terms: 'affordable botox near me', 'botox specials', 'botox cost'. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "The negative is only added when the classifier is confident it blocks no converting term; anything else goes to a person"
+      ]
+    },
+    {
+      "id": 43,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u03480",
+      "prompt": "Our small press gets 800 query letters a month. For each, pick its genre from our list (literary fiction, crime, romance, science fiction, memoir, narrative nonfiction), decide whether it fits our imprint, and score voice distinctiveness, so editors read the best first. Sample letter: 'Dear editor, I am seeking representation for THE SALT ORCHARD, a 92,000-word literary novel about three sisters who inherit a failing orchard on the Oregon coast.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Genre, fit, and voice are separate questions combined into a ranking in code"
+      ]
+    },
+    {
+      "id": 44,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02971",
+      "prompt": "For every booking request message to our boutique hotel, flag suspicious payment requests or pressure tactics so a person can hold them. Sample: 'I will overpay by wire, please refund the difference to my agent.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Flagged bookings are held for a person; the classifier does not cancel bookings"
+      ]
+    },
+    {
+      "id": 45,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u03524",
+      "prompt": "In our math tutoring app, after each student attempt, decide how stuck they are and what kind of error they made so the app picks hint level 1, 2, or 3. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Stuckness is a score with described levels, and the hint level is chosen in code from the answers"
+      ]
+    },
+    {
+      "id": 46,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u03210",
+      "prompt": "During live insurance claims calls, tag each 30-second transcript chunk as empathy, coverage statement, promise, threat, payment details, or other, and flag inappropriate promises for the supervisor. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Only the current transcript chunk is sent, not the whole call"
+      ]
+    },
+    {
+      "id": 47,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02204",
+      "prompt": "Patients ask our aesthetic clinic's website chat about money. Route each question to financing, insurance not accepted, cosmetic versus medical coverage, or other, and show the approved answer block for that topic. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "The classifier picks the topic and code shows a prebuilt approved answer; no answer text is generated"
+      ]
+    },
+    {
+      "id": 48,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02185",
+      "prompt": "Build per-visitor landing pages for our Google Ads traffic from prebuilt sections. For each click we know the ad term, ad group, and device. Prebuilt hero blocks: price-led, results-led, doctor-led; proof blocks: reviews, before-after, credentials. Pick the hero and proof block for each visit. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "recipes.md was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Each page slot is a choice over prebuilt block ids, and layout and the default fallback are decided in code"
+      ]
+    },
+    {
+      "id": 49,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u03296",
+      "prompt": "We scraped 600 competitor ads from the Meta Ad Library. Tag each ad's angle (fear, aspiration, proof, price, urgency) and funnel stage so we can build a swipe file. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Angle and funnel stage are separate choice questions, each with an other or none_fit option"
+      ]
+    },
+    {
+      "id": 50,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u02320",
+      "prompt": "Our clinic blog drafts sometimes include patient anecdotes. For each paragraph, decide whether it is a patient story and whether it says the story is a composite, before publishing. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "A patient story without the composite statement is sent to a person, decided in code"
+      ]
+    },
+    {
+      "id": 51,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u00235",
+      "prompt": "Classify thousands of Zillow listing descriptions by architectural style and renovation status so buyers can filter. Sample: '1920s craftsman bungalow, original woodwork, needs kitchen update.' Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Style and renovation status are separate choice questions, each with an escape option"
+      ]
+    },
+    {
+      "id": 52,
+      "set": "usecase-atlas",
+      "polarity": "should_trigger",
+      "source_id": "u01744",
+      "prompt": "Our Discord server keeps getting raided. For each new message, decide whether it is spam or part of a raid so a bot can block it. Dry run only: show the request you would send and validate it with --dry-run, but do not make a live call.",
+      "expected_output": "The skill reshapes the task into typed questions, validates the request with --dry-run, and keeps facts in code.",
+      "files": [],
+      "assertions": [
+        "classifier-skill was read",
+        "jev_decide.py ran with --dry-run and no live call was made",
+        "Every question is noul, choice or score, and each choice question has an escape option (none_fit, other, or insufficient_context)",
+        "Message rate, repeated-text counts, and mass-mention counts are computed in code, not asked of the classifier"
+      ]
+    },
+    {
+      "id": 53,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u00839",
+      "decline_reason": "needs_facts",
+      "prompt": "Our landing page should show variant A for utm_campaign=botox-spring, variant B for utm_campaign=filler-summer, and the default otherwise. Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply implements a plain lookup or mapping in code"
+      ]
+    },
+    {
+      "id": 54,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u00887",
+      "decline_reason": "needs_facts",
+      "prompt": "Pick each visitor's currency from their Accept-Language header, for example 'en-GB,en;q=0.9' gives GBP and 'de-DE' gives EUR, defaulting to USD. Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply uses the header and a locale table in code"
+      ]
+    },
+    {
+      "id": 55,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u00904",
+      "decline_reason": "needs_facts",
+      "prompt": "Offer 5% off for carts under $50, 10% for $50 to $150, and free shipping above $150. Implement the tier choice from the cart total. Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply implements the thresholds in code"
+      ]
+    },
+    {
+      "id": 56,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u00925",
+      "decline_reason": "needs_facts",
+      "prompt": "Show referral incentive 10%, 15%, or 20% depending on the customer's tier field (bronze, silver, gold). Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply maps the tier field to the incentive in code"
+      ]
+    },
+    {
+      "id": 57,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u01007",
+      "decline_reason": "needs_facts",
+      "prompt": "Bucket companies into 1-50, 51-200, 201-1000, and 1000+ employees from an employee_count number. Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply buckets the numbers in code"
+      ]
+    },
+    {
+      "id": 58,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u01054",
+      "decline_reason": "needs_facts",
+      "prompt": "Label each lead by how recently they submitted the form: under 1 day is hot, under 7 days warm, older is cold. Each lead has a submitted_at ISO timestamp. Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply computes recency from timestamps in code"
+      ]
+    },
+    {
+      "id": 59,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u01049",
+      "decline_reason": "needs_facts",
+      "prompt": "Assign each new lead to a sales rep by state using this territory table: {'OH': 'Ana', 'MI': 'Ana', 'TX': 'Raj', 'FL': 'Lee'}; unknown states go to 'Queue'. Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply joins the lead's state to the territory table in code"
+      ]
+    },
+    {
+      "id": 60,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u00962",
+      "decline_reason": "needs_facts",
+      "prompt": "Our old URLs look like /blog/2019/05/slug and new ones are /articles/slug. Map an old path to its new path. Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply writes a pattern-based redirect rule"
+      ]
+    },
+    {
+      "id": 61,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u01800",
+      "decline_reason": "needs_facts",
+      "prompt": "If a form's 'service' field is 'botox' send it to Ana, if 'laser' send it to Raj, otherwise to the front desk. Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply routes on the field value in code"
+      ]
+    },
+    {
+      "id": 62,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u01322",
+      "decline_reason": "needs_facts",
+      "prompt": "Group keywords by how many of the same URLs rank in their top 10 results. Input: a dict of keyword to list of 10 URLs; two keywords belong together when they share 4 or more URLs. Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply computes URL overlap in code"
+      ]
+    },
+    {
+      "id": 63,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u00955",
+      "decline_reason": "needs_facts",
+      "prompt": "Given attendees' IANA time zones (America/New_York, Europe/London, America/Los_Angeles) and a date, list the hours when it is between 9:00 and 17:00 for all of them. Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply computes the time-zone overlap in code"
+      ]
+    },
+    {
+      "id": 64,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u00936",
+      "decline_reason": "needs_facts",
+      "prompt": "Set the default currency, date format, and measurement units from a browser locale string such as 'en-US', 'en-GB', or 'fr-FR'. Write it as a small Python function in a new file named solution.py, with a short example call.",
+      "expected_output": "No classifier call: plain code or a rule decides this.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply derives the settings from the locale in code"
+      ]
+    },
+    {
+      "id": 65,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u00205",
+      "decline_reason": "needs_generation",
+      "prompt": "Here is a product page's text: 'GlowSkin Pro is an at-home LED mask with red and near-infrared light, 10-minute sessions, FDA-cleared, $299 or 4 payments of $75, built for busy professionals who want clinic results without appointments.' Extract the features, ideal customer profile, messaging, and pricing into a markdown file named product.md.",
+      "expected_output": "No classifier call: this is a writing task for an LLM.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply extracts and writes the content itself"
+      ]
+    },
+    {
+      "id": 66,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u00861",
+      "decline_reason": "needs_generation",
+      "prompt": "Write a unique headline and call-to-action for each of these two visitors to a medspa site: 1) a visitor from a Google ad for 'botox cost' on mobile, 2) a visitor from an Instagram post about lip filler on desktop.",
+      "expected_output": "No classifier call: this is a writing task for an LLM.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply treats this as text generation; any classifier use is limited to picking among prewritten options"
+      ]
+    },
+    {
+      "id": 67,
+      "set": "usecase-atlas",
+      "polarity": "should_decline",
+      "source_id": "u00906",
+      "decline_reason": "needs_generation",
+      "prompt": "A user clicked 'Export CSV' on a report with 0 rows and got the error 'EMPTY_RESULT_SET'. Write a short, helpful explanation for them of what happened and what to do next.",
+      "expected_output": "No classifier call: this is a writing task for an LLM.",
+      "files": [],
+      "assertions": [
+        "jev_decide.py was not run",
+        "No Reshape: block is shown",
+        "The reply treats this as text generation for an LLM"
+      ]
     }
   ]
 }
