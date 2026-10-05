@@ -21,7 +21,7 @@ A task qualifies when the answer is one of a finite set you can name in advance 
 2. Items become cards (`state`), decisions become questions, answer sets become piles or rubric levels.
 3. Run it, act on the answers in code, and hand back to the LLM or a person only what the classifier left undecided: flagged, `none_fit`, or below threshold.
 
-Once this skill is loaded for a list of 3 or more items, run the classifier (a dry run when the user asked for one). Do not answer the items from your own judgment instead; if the call fails, report the failure rather than substituting your answers.
+Once this skill is loaded for a list of 3 or more items, run the classifier (a dry run when the user asked for one). Do not answer the items from your own judgment instead; if the call fails, report the failure rather than substituting your answers. The one exception is the sheet path below, whose `judge` step hands some items back to you; label those judgments as your own, not the classifier's.
 
 Show the reshape before calling, so it can be reviewed:
 
@@ -122,9 +122,9 @@ After a live call, report the selected answer, the runner-up and its probability
 - **Spot-check:** acceptable but not proven on this kind of input.
 - **Human review:** any `review` reason, missing facts, or a material consequence. Medical, legal, and financial claims always get human review.
 
-Each invocation appends one metadata line to a call log: the reshape note, recipe, question types, option counts, items, flags, invalid answers, tokens, cost, and time, never `state` or answers. The default is `~/.local/state/classifier-skill/calls.jsonl`; `CLASSIFIER_SKILL_LOG` sets another path or `off`. `python3 <skill-directory>/scripts/reshape_report.py` summarizes it by recipe, for reviewing reshaped work and re-tuning the skill. Re-tuning is a person's decision: propose one recipe change at a time from the report, rerun that recipe's eval cases, and change the recipe only when they still pass.
+Each invocation appends one metadata line to a private (mode 0600) call log: the reshape note (keep its fields to short generic labels with no item or client text; each is cut at 120 characters), recipe, question types, option counts, items, flags, invalid answers, tokens, cost, and time, never `state` or answers. The default is `~/.local/state/classifier-skill/calls.jsonl`; `CLASSIFIER_SKILL_LOG` sets another path or `off`. `python3 <skill-directory>/scripts/reshape_report.py` summarizes it by recipe, for reviewing reshaped work and re-tuning the skill. Re-tuning is a person's decision: propose one recipe change at a time from the report, rerun that recipe's eval cases, and change the recipe only when they still pass.
 
-If the endpoint fails, show that result instead of silently substituting another model or your own opinion.
+If the endpoint fails, show that result instead of silently substituting another model or your own opinion. Only the sheet path below hands items back to you, and then openly.
 
 The OpenRouter Decisions endpoint is alpha (contract last verified 2026-09-23; re-check when a call fails validation or every 90 days). TypeSafe's direct API shares the same request and answer shapes (per its docs, 2026-09-23; not yet exercised by this skill). Ollama System One was contract-tested from its documented response shape on 2026-09-30. If a contract changes, consult the current [TypeSafe API reference](https://docs.typesafe.ai/api), [TypeSafe agent documentation](https://docs.typesafe.ai/agent-skill), [OpenRouter Jev example](https://openrouter.ai/labs/jev/compile), or [Ollama decision-model documentation](https://ollama.com/library/nimble) before changing the wrapper.
 
@@ -134,8 +134,8 @@ When a question sheet exists for the task (a caller's, or one kept in `~/.config
 
 1. Write the items to a JSONL file created with `mktemp`, one object per line, with the sheet's id and card fields.
 2. Run `python3 <skill-directory>/scripts/classify_items.py --sheet <sheet> --items <file> --out <out> --summary <summary> --caller <calling skill>`.
-3. Read the summary. If it is missing, `complete` is false, or `items_out` differs from `items_in`, judge the original list yourself and say so.
-4. Apply the calling step's own rules to `answered` dispositions, list `human` ones for review, and judge `unanswered` items yourself. Items with `below_min_items` are expected; any other reason is a failure to report.
+3. Read the summary. If it is missing, `complete` is false, or `items_out` differs from `items_in`, judge the original list yourself and label those judgments as yours.
+4. Apply the calling step's own rules to `answered` dispositions, list `human` ones for review, and judge `unanswered` items yourself, labelled as yours. Items with `below_min_items` are expected: a sheet's `min_items` (default 20) is the caller's threshold and replaces the 3-item rule above. Any other reason is a failure to report. A dry run sends nothing and shows every payload, whatever the item count.
 5. End with the `Classifier: <answered>/<human>/<unanswered> (<reasons>)` line the script prints.
 
 Sheets hold data only: questions or a generic recipe from `recipes/`, the card fields, thresholds, and the data rule; the schema is in [references/callers.md](references/callers.md). An answer is evidence, never permission to act.

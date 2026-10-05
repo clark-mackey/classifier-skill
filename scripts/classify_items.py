@@ -43,7 +43,7 @@ AUTH_STATUSES, BAD_REQUEST_STATUSES = {401, 403}, {400, 404, 422}
 
 def load_recipe(ref: str) -> dict[str, Any]:
     """A generic, versioned question set shipped in recipes/<name>@<N>.json. Recipes hold no caller's rules."""
-    if not RECIPE_REF.match(ref):
+    if not isinstance(ref, str) or not RECIPE_REF.match(ref):
         jev.fail(f"recipe {ref!r} must look like name@N")
     path = RECIPES / f"{ref}.json"
     try:
@@ -270,7 +270,9 @@ def main() -> None:
     started, run_id = time.monotonic(), uuid.uuid4().hex[:12]
     counts = {"answered": 0, "human": {}, "skip": {}, "unanswered": {}, "written": 0}
     cost, tokens, redacted, flagged, models = 0.0, 0, 0, 0, set()
-    bypass = len(items) < sheet.get("min_items", DEFAULT_MIN_ITEMS) and not sheet.get("recurring", False)
+    # A dry run always shows its payloads, so a small sample can be reviewed before the real run.
+    bypass = (not args.dry_run and len(items) < sheet.get("min_items", DEFAULT_MIN_ITEMS)
+              and not sheet.get("recurring", False))
     stopped = "below_min_items" if bypass else blocked_reason(args, sheet)
 
     with out_path.open("w", encoding="utf-8") as out:

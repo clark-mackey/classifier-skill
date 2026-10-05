@@ -7,8 +7,22 @@ import sys
 from pathlib import Path
 
 SKILL = Path(__file__).resolve().parent.parent
-# A command that runs a classifier script (not one that reads its source or only asks for help or the version)
-SCRIPT_RUN = re.compile(r"python3?\s+\S*(?:jev_decide|classify_items)\.py")
+# A command that runs a classifier script, however it is launched (python3 -u, ./script, or a subprocess call
+# inside python3 -c or a heredoc); not one that reads its source or only asks for help or the version
+SCRIPT_RUN = re.compile(r"(?:jev_decide|classify_items)\.py")
+READERS = {"sed", "rg", "grep", "cat", "head", "tail", "nl", "wc", "less", "rtk", "ls", "awk"}
+WRAPPER = re.compile(r"""^\s*(?:/bin/)?(?:z|ba)?sh\s+-l?c\s+['"]?""")
+
+
+def unwrap(command):
+    """The command as the shell ran it: no `zsh -lc '...'` wrapper, and no backslash-escaped quotes."""
+    return WRAPPER.sub("", command).replace('\\"', '"')
+
+
+def reads_source(command):
+    """True when the command only reads a script (sed, rg, cat, ...) rather than running it."""
+    first = unwrap(command).split(None, 1)
+    return bool(first) and first[0].rsplit("/", 1)[-1] in READERS and bool(SCRIPT_RUN.search(command))
 INFO_ONLY = ("--help", "--contract-version")
 
 
@@ -50,7 +64,9 @@ def facts(run):
     final = (run / "final.txt").read_text() if (run / "final.txt").exists() else ""
     text = "\n".join(messages + [final])
     admissible = re.findall(r"Admissible:[^\n]*", text)
-    jev_calls = [c for c in commands if SCRIPT_RUN.search(c) and not any(flag in c for flag in INFO_ONLY)]
+    commands = [unwrap(c) for c in commands]
+    jev_calls = [c for c in commands if SCRIPT_RUN.search(c) and not reads_source(c)
+                 and not any(flag in c for flag in INFO_ONLY)]
     log = call_log(run)
     return {
         "skill_read": any("classifier-skill" in c for c in commands),
@@ -60,11 +76,12 @@ def facts(run):
         "recipes_read": any("recipes.md" in c for c in commands),
         "batch_used": any("--batch" in c or "classify_items.py" in c for c in jev_calls),
         "criteria_seen": sorted({k for k in ("same_intent_duplicate", "partial_overlap", "insufficient_context", "none_fit",
-                                             "no_evidence", "contradiction") if any(k in c for c in jev_calls)}),
+                                             "no_evidence", "contradiction") if any(k in c for c in commands)}),
+        # requests are often written to a file in one command and sent with --request-file in another
         "types_seen": sorted({t for t in ("noul", "choice", "score")
-                              if any(re.search(rf'"type"\s*:\s*"{t}"', c) for c in jev_calls)}),
-        "script_source_read": any(re.search(r"(sed -n|rg |cat |rtk read |head |tail )[^|;]*jev_decide\.py", c)
-                                  for c in commands),
+                              if any(re.search(rf'"type"\s*:\s*"{t}"', c) for c in commands)}
+                             | set(log["log_question_types"])),
+        "script_source_read": any(reads_source(c) for c in commands),
         "wrote_request_file": any(("apply_patch" in c or "> " in c) and "request" in c.lower() and ".json" in c
                                   for c in commands),
         "admissible_line": admissible[0][:200] if admissible else None,

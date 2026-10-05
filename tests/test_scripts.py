@@ -165,6 +165,20 @@ class AnswerErrors(unittest.TestCase):
                     self.assertTrue(self.module.answer_errors(response, self.QUESTIONS))
         self.assertTrue(self.module.answer_errors({"pile": self.GOOD["pile"]}, self.QUESTIONS))
 
+    def test_unhashable_or_inconsistent_answers_are_invalid_not_crashes(self):
+        cases = {"pile": {"type": "choice", "choice": ["a"], "probabilities": {"a": 0.9, "b": 0.1}, "confidence": 0.8},
+                 "anger": {"type": "score", "score": 2, "confidence": 0.9,
+                           "probabilities": {"0": 1.0, "1": 0.0, "2": 0.0}}}
+        for question_id, answer in cases.items():
+            with self.subTest(question=question_id):
+                self.assertTrue(self.module.answer_errors({**self.GOOD, question_id: answer}, self.QUESTIONS))
+
+    def test_non_string_model_is_invalid(self):
+        for model in ({}, ["jev"], 3):
+            with self.subTest(model=model):
+                errors = self.module.response_errors({"model": model, "answers": self.GOOD}, self.QUESTIONS)
+                self.assertEqual(errors, ["response model is not a string"])
+
 
 class Retry(unittest.TestCase):
     def test_retries_transient_status_then_succeeds(self):
@@ -334,7 +348,7 @@ class Providers(unittest.TestCase):
             return Response(json.dumps(reply).encode())
 
         out = io.StringIO()
-        with mock.patch.object(module.urllib.request, "urlopen", urlopen), \
+        with mock.patch.object(module.LOCAL_OPENER, "open", urlopen), \
                 mock.patch.object(sys, "argv", ["jev_decide.py", "--provider", "ollama"]), \
                 mock.patch.object(sys, "stdin", io.StringIO(json.dumps(request))), \
                 mock.patch.object(sys, "stdout", out), \
@@ -399,7 +413,7 @@ class Providers(unittest.TestCase):
             return Response(json.dumps(reply).encode())
 
         out = io.StringIO()
-        with mock.patch.object(module.urllib.request, "urlopen", urlopen), \
+        with mock.patch.object(module.LOCAL_OPENER, "open", urlopen), \
                 mock.patch.object(sys, "argv", ["jev_decide.py", "--provider", "compatible", "--local-only"]), \
                 mock.patch.object(sys, "stdin", io.StringIO(self.REQUEST)), mock.patch.object(sys, "stdout", out), \
                 mock.patch.dict(os.environ, {**self.COMPATIBLE, "CLASSIFIER_SKILL_LOG": "off"}):
@@ -428,6 +442,18 @@ class CallLog(unittest.TestCase):
             self.assertEqual((record["recipe"], record["options"], record["reshape_noted"]),
                              ("card-sort", {"pile": 3}, True))
             self.assertNotIn("customer 42", log.read_text())
+
+    def test_log_is_private_and_reshape_fields_are_capped(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "calls.jsonl"
+            payload = {"model": "m", "questions": {"q": {"type": "noul", "instructions": "x?"}},
+                       "reshape": {"task": "x" * 500}}
+            note = module.take_reshape(payload)
+            with mock.patch.dict(os.environ, {"CLASSIFIER_SKILL_LOG": str(log)}):
+                module.log_call(mock.Mock(provider="openrouter"), note, payload, {"mode": "single"})
+            self.assertEqual(len(json.loads(log.read_text())["task"]), module.RESHAPE_MAX_CHARS)
+            self.assertEqual(log.stat().st_mode & 0o777, 0o600)
 
     def test_recipe_normalized_to_known_name_or_custom(self):
         module = load_module()
@@ -533,7 +559,7 @@ class CallerContract(unittest.TestCase):
         "pile": {"type": "choice", "instructions": "Pile?", "criteria": {"a": "x", "b": "y"}},
     }
     GOOD = {"model": "typesafe/jev-1.13", "usage": {"input_tokens": 40, "cost": 0.00001},
-            "answers": {"severity": {"type": "score", "score": 2.1, "confidence": 0.9,
+            "answers": {"severity": {"type": "score", "score": 2.05, "confidence": 0.9,
                                      "probabilities": {"0": 0.0, "1": 0.05, "2": 0.85, "3": 0.1}},
                         "applies": {"type": "noul", "noul": 0.5},
                         "pile": {"type": "choice", "choice": "a", "probabilities": {"a": 0.9, "b": 0.1},
@@ -643,6 +669,30 @@ class CallerContract(unittest.TestCase):
 
 
 
+class LocalProxy(unittest.TestCase):
+    def test_loopback_calls_ignore_environment_proxies(self):
+        with mock.patch.dict(os.environ, {"HTTP_PROXY": "http://proxy.invalid:8080", "http_proxy": "http://proxy.invalid:8080"}):
+            module = load_module()
+        handlers = [h for h in module.LOCAL_OPENER.handlers if isinstance(h, module.urllib.request.ProxyHandler)]
+        self.assertEqual([h.proxies for h in handlers if h.proxies], [])  # an empty ProxyHandler registers no hooks
+
+        class Response(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        reply = {"model": "nimble:9b", "answers": {"q": {"type": "noul", "noul": 0.9}}}
+        remote = mock.Mock(side_effect=AssertionError("loopback call went through the proxied opener"))
+        with mock.patch.object(module.urllib.request, "urlopen", remote), \
+                mock.patch.object(module.LOCAL_OPENER, "open", lambda req, timeout: Response(json.dumps(reply).encode())):
+            result = module.call_jev({"state": "x", "questions": {"q": {"type": "noul", "instructions": "x?"}}},
+                                     "http://127.0.0.1:11434/v1/systemone", 5, "ollama")
+        self.assertEqual(result["model"], "nimble:9b")
+        remote.assert_not_called()
+
+
 class Redaction(unittest.TestCase):
     def test_secrets_replaced_and_ordinary_text_kept(self):
         module = load_module()
@@ -656,6 +706,16 @@ class Redaction(unittest.TestCase):
         self.assertEqual(scrubbed["notes"][0], "token=[REDACTED:secret_value]")
         self.assertNotIn("sk-or-v1", json.dumps(scrubbed))
         self.assertEqual((scrubbed["commit"], scrubbed["text"]), (state["commit"], state["text"]))
+
+    def test_any_value_under_a_secret_key_is_replaced(self):
+        module = load_module()
+        state = {"api_key": {"value": "plainsecret"}, "password": 123456, "token": ["a", "b"], "secret": None,
+                 "refresh_token": False}
+        scrubbed, count = module.redact(state)
+        self.assertEqual(count, 3)
+        self.assertNotIn("plainsecret", json.dumps(scrubbed))
+        self.assertEqual(scrubbed["password"], "[REDACTED:secret_value]")
+        self.assertEqual((scrubbed["secret"], scrubbed["refresh_token"]), (None, False))
 
     def test_dry_run_shows_redacted_state_unless_disabled(self):
         request = json.dumps({"state": "password: hunter2hunter2", "questions": {"q": {"type": "noul", "instructions": "x?"}}})
@@ -918,7 +978,7 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([l["id"] for l in lines], [i["term"] for i in self.ITEMS])
         self.assertTrue(all(l["versions"] == {"sheet": "test-terms@2", "recipe": None, "model": "typesafe/jev-1.13",
-                                              "contract": "1.6", "context": "02f189c76132"} for l in lines))
+                                              "contract": "1.7", "context": "02f189c76132"} for l in lines))
         self.assertEqual((summary["complete"], summary["items_in"], summary["items_out"], summary["answered"]),
                          (True, 4, 4, 4))
         self.assertIn("Classifier: 4/0/0 (none)", err)
@@ -950,6 +1010,17 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual(lines[0]["reason"], "below_min_items")
         self.assertTrue(summary["bypass"])
         self.assertFalse(summary["degraded"])
+
+    def test_dry_run_shows_payloads_below_min_items(self):
+        code, lines, summary, sent, _ = self.judge(self.ITEMS[:1], [], argv=["--dry-run"])
+        self.assertEqual((code, sent), (0, []))
+        self.assertEqual(lines[0]["status"], "dry_run")
+        self.assertIn("payload", lines[0])
+        self.assertFalse(summary["bypass"])
+
+    def test_non_string_recipe_exits_2(self):
+        code, _, _, sent, _ = self.judge(self.ITEMS, [], sheet={**self.SHEET, "recipe": ["x"]})
+        self.assertEqual((code, sent), (2, []))
 
     def test_recurring_sheet_runs_a_single_item(self):
         code, lines, _, sent, _ = self.judge(self.ITEMS[:1], [self.answer()], sheet={**self.SHEET, "recurring": True})
@@ -1026,7 +1097,7 @@ class ItemsEngine(unittest.TestCase):
 
     def test_contract_version(self):
         result = run("classify_items.py", "--contract-version")
-        self.assertEqual(result.stdout.strip(), "1.6")
+        self.assertEqual(result.stdout.strip(), "1.7")
 
     def test_context_file_replaces_sheet_context(self):
         with tempfile.TemporaryDirectory() as tmp:

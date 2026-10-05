@@ -52,6 +52,7 @@ NIMBLE_MAX_TOKENS = 8_192
 RETRY_STATUSES = {429, 500, 502, 503, 504, 529}  # a classification call has no side effects, so retrying is safe
 RETRY_DELAYS = (0.5, 1.0)
 ALLOWED_FIELDS = {"model", "state", "questions", "provider", "trace", "session_id", "user"}
+RESHAPE_MAX_CHARS = 120
 RESHAPE_FIELDS = {"task", "recipe", "offloaded", "kept_for_llm", "caller"}  # local-only notes, never sent
 # jev-1.13 limits (TypeSafe models page, 2026-09-25): 64k tokens per request, 32k for state plus the longest
 # question. Tokens are estimated (4 ASCII characters each, 1.5 per other character), so a refusal near the limit
@@ -75,7 +76,7 @@ REDACTIONS = (
 SECRET_KEY = re.compile(rf"(?i)(?:x-)?(?:{SECRET_KEYS})")  # an object field whose whole name is a secret key
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.6"
+CONTRACT_VERSION = "1.7"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -87,6 +88,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 urllib.request.install_opener(urllib.request.build_opener(NoRedirect))
+# Loopback calls skip any HTTP(S)_PROXY from the environment, so local-only data never leaves the machine.
+LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
 
 
 def fail(message: str, code: int = 2) -> NoReturn:
@@ -179,7 +182,8 @@ def redact(value: Any) -> tuple[Any, int]:
     if isinstance(value, dict):
         out, count = {}, 0
         for key, item in value.items():
-            if isinstance(item, str) and item and SECRET_KEY.fullmatch(str(key).strip()):
+            if item not in (None, "", [], {}) and not isinstance(item, bool) \
+                    and SECRET_KEY.fullmatch(str(key).strip()):
                 out[key], n = "[REDACTED:secret_value]", 1
             else:
                 out[key], n = redact(item)
@@ -331,7 +335,8 @@ def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: s
     for attempt in range(len(RETRY_DELAYS) + 1):
         retry = attempt < len(RETRY_DELAYS)
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            opener = LOCAL_OPENER.open if is_local(endpoint) else urllib.request.urlopen
+            with opener(request, timeout=timeout) as response:
                 return json.load(response)
         except urllib.error.HTTPError as exc:
             asked = retry_after(exc)
@@ -373,6 +378,9 @@ def retry_after(exc: urllib.error.HTTPError) -> float | None:
     return max(0.0, (when - datetime.datetime.now(datetime.timezone.utc)).total_seconds())
 
 
+SCORE_TOLERANCE = 0.05  # `score` is the expected level, Σ level × probability; allow for provider rounding
+
+
 def _unit(value: Any) -> bool:
     return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1
 
@@ -394,7 +402,7 @@ def answer_errors(answers: Any, questions: dict[str, Any]) -> list[str]:
             errors.append(f"{question_id}: missing or wrong-type answer")
         elif kind == "choice":
             options, probabilities = set(question["criteria"]), answer.get("probabilities")
-            if (answer.get("choice") not in options or not _distribution(probabilities, options)
+            if (not isinstance(answer.get("choice"), str) or answer["choice"] not in options or not _distribution(probabilities, options)
                     or not _unit(answer.get("confidence"))
                     or probabilities[answer["choice"]] < max(probabilities.values()) - 1e-6):
                 errors.append(f"{question_id}: choice answer is not a valid pick over the offered options")
@@ -405,8 +413,9 @@ def answer_errors(answers: Any, questions: dict[str, Any]) -> list[str]:
             levels, score = len(question["criteria"]), answer.get("score")
             if (not _distribution(answer.get("probabilities"), {str(i) for i in range(levels)})
                     or type(score) not in (int, float) or not 0 <= score <= levels - 1
-                    or not _unit(answer.get("confidence"))):
-                errors.append(f"{question_id}: score answer is outside the rubric")
+                    or not _unit(answer.get("confidence"))
+                    or abs(score - sum(int(k) * p for k, p in answer["probabilities"].items())) > SCORE_TOLERANCE):
+                errors.append(f"{question_id}: score answer is outside the rubric or disagrees with its probabilities")
     return errors
 
 
@@ -416,6 +425,8 @@ def response_errors(response: Any, questions: dict[str, Any]) -> list[str]:
         return ["response is not a JSON object"]
     if not isinstance(response.get("usage"), (dict, type(None))):
         return ["response usage is not an object"]
+    if not isinstance(response.get("model"), (str, type(None))):
+        return ["response model is not a string"]
     return answer_errors(response.get("answers"), questions)
 
 
@@ -480,6 +491,8 @@ def take_reshape(payload: dict[str, Any]) -> dict[str, str]:
         fail(f"reshape must be an object of non-empty strings with keys from: {', '.join(sorted(RESHAPE_FIELDS))}")
     if "caller" in note:
         note["caller"] = caller_slug(note["caller"])
+    # The note is logged, so keep it to short generic labels; long free text is where item content would leak.
+    note = {k: v if len(v) <= RESHAPE_MAX_CHARS else v[:RESHAPE_MAX_CHARS - 1] + "…" for k, v in note.items()}
     recipes = known_recipes()
     recipe = note.get("recipe", "custom").strip()
     if recipe != "custom" and recipes is not None and recipe not in recipes:
@@ -517,7 +530,8 @@ def log_call(args: argparse.Namespace, note: dict[str, str], template: dict[str,
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
+        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
     except OSError as exc:
         print(f"classifier-skill: could not write call log {path}: {exc}", file=sys.stderr)
@@ -601,7 +615,7 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
         done += 1
     if not args.dry_run:
         cost = f"cost ${total_cost:.6f}" if total_cost else "cost not reported by provider"
-        print(f"classifier-skill: {len(states)} states, {done} answered, {flagged} flagged for review, "
+        print(f"classifier-skill: {len(states)} states, {done - invalid} answered, {flagged} flagged for review, "
               f"{invalid} invalid, {cost}", file=sys.stderr)
         if stopped:
             print(f"classifier-skill: stopped at batch line {stopped[0]}; lines from there on were not sent: "

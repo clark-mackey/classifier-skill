@@ -1,6 +1,6 @@
 # Calling the classifier from another skill
 
-Contract version **1.6**. This is the interface other skills may rely on; anything not listed here can change without notice. Tests in `tests/test_scripts.py` (`CallerContract`) pin every guarantee below.
+Contract version **1.7**. This is the interface other skills may rely on; anything not listed here can change without notice. Tests in `tests/test_scripts.py` (`CallerContract`) pin every guarantee below.
 
 ## Find the script
 
@@ -14,7 +14,7 @@ None found: skip your classifier step and say so.
 
 ## Check the version
 
-`python3 <script> --contract-version` prints the version (`1.6`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions only add.
+`python3 <script> --contract-version` prints the version (`1.7`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions only add.
 
 ## Call
 
@@ -63,12 +63,12 @@ python3 <classify_items.py> --sheet SHEET.json --items ITEMS.jsonl --out OUT.jso
 | Field | Required | Meaning |
 |---|---|---|
 | `sheet`, `version` | yes | name (lowercase, digits, hyphens) and integer version; a new version for any change to questions, fields, or recipe |
-| `contract` | yes | the contract you wrote for, e.g. `"1.6"`; a different major exits 2 |
+| `contract` | yes | the contract you wrote for, e.g. `"1.7"`; a different major exits 2 |
 | `data` | yes | `cloud_ok`, or `local_only` (then only a server on this machine is used) |
 | `fields` | yes | `{"id": <item field>, "card": [<item fields sent>]}`; only card fields are sent; `id` defaults to `id` |
 | `questions` and/or `recipe` | one of | questions as in SKILL.md, each with an optional `threshold` (0.5–1, default 0.8); `recipe` names a generic set in `recipes/<name>@<N>.json`, and sheet questions override recipe questions by id |
 | `context` | no | one string of facts sent with every card (e.g. what the business sells); `--context FILE` replaces it, so one generic sheet serves many accounts |
-| `min_items` | no | default 20; fewer items are not sent (`below_min_items`) |
+| `min_items` | no | default 20; fewer items are not sent (`below_min_items`), except in a dry run, which shows every payload |
 | `recurring` | no | `true` runs even one item: a fixed checkpoint kept for consistency, not tokens |
 | `model` | no | pinned model per provider, e.g. `{"openrouter": "typesafe/jev-1.13", "typesafe": "jev-1.13.0", "ollama": "nimble:9b"}`; a plain string is an OpenRouter id and is ignored, with a warning, on any other provider |
 | `margin`, `consumes` | no | close-runner-up margin (default 0.2); plain words on how your step uses each answer |
@@ -88,7 +88,7 @@ A disposition is never permission to act. Your own rules decide what each answer
 
 ## Reshape note
 
-Optional `"reshape"` object, stripped before sending and written to the metadata-only call log: `task`, `recipe` (a recipe name from recipes.md or `custom`), `offloaded`, `kept_for_llm`, and `caller`. Values are non-empty strings.
+Optional `"reshape"` object, stripped before sending and written to the metadata-only call log: `task`, `recipe` (a recipe name from recipes.md or `custom`), `offloaded`, `kept_for_llm`, and `caller`. Values are non-empty strings: short generic labels with no item text, client names, or personal data, since they are logged; each is cut at 120 characters.
 - Set `caller` to your skill's name; it is normalized to a lowercase slug (`Code Owl` → `code-owl`) so `reshape_report.py` groups your calls.
 - Unknown fields are ignored with a stderr warning, so a newer caller still works with an older script.
 
@@ -103,6 +103,7 @@ A calling skill may replace this skill's workflow for its own purpose: the Resha
 
 ## Changelog
 
+- **1.7** (2026-10-04): loopback calls ignore `HTTP(S)_PROXY`; any non-empty value under a secret-named key is redacted, not only strings; a non-string `model` or `choice`, or a `score` more than 0.05 from its probabilities' expected level, is invalid (exit 3) instead of crashing; `reshape` fields are cut at 120 characters and the call log is created mode 0600; the batch summary's `answered` excludes invalid lines; `classify_items.py` dry runs show payloads below `min_items`, and a non-string sheet `recipe` exits 2.
 - **1.6** (2026-09-30): first-class loopback-only Ollama 0.35 System One provider, defaulting to `nimble:9b`; provider-specific question, option, body, and Nimble context limits; recorded Ollama response contract test.
 - **1.5** (2026-09-29): `retry-after` is read as seconds or an HTTP date; one longer than 10 seconds ends the request at once (exit 1) instead of being retried early. A failed call is written to the call log with a `failed` status code and no content, and `reshape_report.py` counts failures. `score_labels.py` rejects a `--holdout` outside (0, 1) or a `--target` outside (0, 1].
 - **1.4** (2026-09-29): `classify_items.py` keeps going after a one-item failure (`too_large`, `invalid_answer`) and marks items after a run-wide failure `not_sent`; new reason `empty_card` instead of exit 2; sheet `model` may pin per provider; output paths may not overwrite inputs. Redirects are refused (exit 1) so a key never follows one; an answer to a question that was not asked, or a response that is not a JSON object, is invalid (exit 3).
