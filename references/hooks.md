@@ -33,12 +33,12 @@ The sub-agent tool has been named both `Agent` and `Task`; the matcher covers bo
 
 ## Main-session list nudge
 
-`hooks/nudge_list_result.py` is a `PostToolUse` hook for the main session. Requests usually name the workflow ("run the weekly sweep", "audit the site"), not the per-item work inside it, so the skill's description has nothing to match. The list shows up later, in a tool result: a search-terms report, a keyword export, a table of audit findings. The hook reads each tool result, and when plain code finds 20 or more rows that carry a judged text field (a field named like search term, keyword, query, anchor, issue, finding, headline, title, description or review, in a JSON list of objects or in a tab or pipe table with a header), it adds one note, marked `[classifier-nudge]`, to the model's context.
+`hooks/nudge_list_result.py` is a `PostToolUse` hook for the main session. Requests usually name the workflow ("run the weekly sweep", "audit the site"), not the per-item work inside it, so the skill's description has nothing to match. The list shows up later, in a tool result: a search-terms report, a keyword export, a table of audit findings. The hook reads each tool result, and when plain code finds 20 or more rows that carry a judged text field (a field whose name ends in search term, keyword, query, anchor, issue, finding, headline, review, comment, subject or snippet, optionally followed by "text", in a JSON list of objects, JSON Lines, or a tab, pipe or comma table with a header), it adds one note, marked `[classifier-nudge]`, to the model's context.
 
 - It calls no model and sends nothing anywhere. It never blocks, and on any error it does nothing.
-- Lists with nothing to judge stay silent: metric histories, site or tool listings, tables without a judged column. Edit, sub-agent, search and skill tools are skipped, and a `Read` counts only for `.csv`, `.tsv`, `.json` and `.jsonl` files.
-- It fires at most once per tool per session (a marker file in the temp directory), skips the classifier's own runs, and stays silent for leaf workers (`MODEL_WORKER_LEAF=1`) or when `CLASSIFIER_NUDGE=off`.
-- Replayed over a week of real sessions, it fired in 12 of 91, mostly on search-term reports, keyword lists, shared negative lists and organic-keyword exports.
+- Lists with nothing to judge stay silent: metric histories, site or tool listings, tables without a judged column, and metrics about text such as `reviewCount` or `titleLength`. Rows are counted one by one, so a leading totals row does not hide a list, and a markdown table's separator line is not a row. Edit, sub-agent, search and skill tools are skipped, and a `Read` counts only for `.csv`, `.tsv`, `.json` and `.jsonl` files.
+- It fires at most once per tool per session (a marker file in the temp directory, keyed by the parent process when the event has no session id), skips the classifier's own runs, and stays silent for leaf workers (`MODEL_WORKER_LEAF=1`) or when `CLASSIFIER_NUDGE=off`.
+- Replayed over a week of real sessions, it fired in 15 of 91, mostly on search-term reports, keyword lists, organic-keyword exports and report tables of terms.
 
 ```json
 {

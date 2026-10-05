@@ -865,6 +865,29 @@ class ListResultNudge(unittest.TestCase):
                                     tool_input={"command": "python3 scripts/jev_decide.py --batch r.jsonl"}))
         self.assertIsNone(self.fire(self.terms, env={"CLASSIFIER_NUDGE": "off"}))
         self.assertIsNone(self.fire(self.terms, env={"MODEL_WORKER_LEAF": "1"}))
+        # metrics about text are not the text: reviewCount, titleLength
+        metrics = [{"reviewCount": i, "titleLength": i} for i in range(30)]
+        self.assertIsNone(self.fire([{"type": "text", "text": json.dumps(metrics)}], session="s4"))
+        # 19 data rows under a header and a |---| separator stay below the threshold
+        table = "| keyword | clicks |\n|---|---|\n" + "\n".join(f"| kw {i} | {i} |" for i in range(19))
+        self.assertIsNone(self.fire({"stdout": table}, tool="Bash", session="s5"))
+
+    def test_counts_csv_jsonl_and_lists_led_by_a_summary(self):
+        csv_text = "Search term,Clicks\n" + "\n".join(f'"term, {i}",{i}' for i in range(30))
+        self.assertIn("30 rows", self.fire({"file": {"content": csv_text}}, tool="Read",
+                                           tool_input={"file_path": "/x/terms.csv"}))
+        jsonl = "\n".join(json.dumps({"keyword": f"kw {i}"}) for i in range(22))
+        self.assertIn("22 rows", self.fire({"file": {"content": jsonl}}, tool="Read",
+                                           tool_input={"file_path": "/x/kw.jsonl"}, session="s8"))
+        led = [{"total_cost": 99}] + [{"anchorText": f"a {i}"} for i in range(21)]
+        self.assertIn("21 rows", self.fire([{"type": "text", "text": json.dumps(led)}], session="s6"))
+        table = "| Keyword | Clicks |\n|---|---|\n" + "\n".join(f"| kw {i} | {i} |" for i in range(20))
+        self.assertIn("20 rows", self.fire({"stdout": table}, tool="Bash", session="s7"))
+
+    def test_missing_session_id_falls_back_to_the_parent_process(self):
+        blocks = [{"type": "text", "text": json.dumps(self.terms)}]
+        self.assertIsNotNone(self.fire(blocks, session=""))
+        self.assertIsNone(self.fire(blocks, session=""))  # same parent process, same stand-in session
 
     def test_fails_open_on_bad_input(self):
         result = subprocess.run([sys.executable, str(self.HOOK)], input="not json", capture_output=True, text=True)
