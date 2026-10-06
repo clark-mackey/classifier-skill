@@ -497,6 +497,8 @@ def take_reshape(payload: dict[str, Any]) -> dict[str, str]:
     recipe = note.get("recipe", "custom").strip()
     if recipe != "custom" and recipes is not None and recipe not in recipes:
         note["recipe_text"] = recipe  # keep the free text, but group it under custom in the log
+        print(f"classifier-skill: recipe {recipe!r} is not in references/recipes.md; logged as custom. Use a "
+              "recipe's name exactly, or \"custom\" for your own design.", file=sys.stderr)
         recipe = "custom"
     note["recipe"] = recipe
     return note

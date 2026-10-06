@@ -82,7 +82,7 @@ The deciding test: the answer is one of a finite set you can name in advance, it
 
 ## Known weak spots (jev-1.13)
 
-From TypeSafe's model-jaggedness notes (checked 2026-09-25). Design around these rather than hoping:
+From TypeSafe's model-jaggedness notes (checked 2026-09-25). Re-check them against the current notes when the default model changes or 90 days after the date above, and update this list and the heading. Design around these rather than hoping:
 
 - **Literal reading.** It answers the question as written; say exactly what counts, including the edge cases.
 - **No arithmetic, date math, or counting.** Compute totals, ages, deadlines, and counts in code and put the result in `state`.

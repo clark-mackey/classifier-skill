@@ -91,6 +91,7 @@ A disposition is never permission to act. Your own rules decide what each answer
 Optional `"reshape"` object, stripped before sending and written to the metadata-only call log: `task`, `recipe` (a recipe name from recipes.md or `custom`), `offloaded`, `kept_for_llm`, and `caller`. Values are non-empty strings: short generic labels with no item text, client names, or personal data, since they are logged; each is cut at 120 characters.
 - Set `caller` to your skill's name; it is normalized to a lowercase slug (`Code Owl` → `code-owl`) so `reshape_report.py` groups your calls.
 - Unknown fields are ignored with a stderr warning, so a newer caller still works with an older script.
+- A `recipe` that is not a recipe name from recipes.md is logged as `custom` (the text kept in `recipe_text`) with a stderr warning; the call still runs.
 
 ## Rules a caller may not waive
 

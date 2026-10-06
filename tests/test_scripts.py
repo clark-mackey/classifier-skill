@@ -465,6 +465,13 @@ class CallLog(unittest.TestCase):
                 result = module.take_reshape({"reshape": dict(note)})
                 self.assertEqual((result["recipe"], result.get("recipe_text")), (recipe, text))
 
+    def test_unknown_recipe_warns_and_still_answers(self):
+        request = {"state": "x", "reshape": {"recipe": "card sort"},
+                   "questions": {"q": {"type": "noul", "instructions": "x?"}}}
+        result = run("jev_decide.py", "--dry-run", stdin=json.dumps(request))
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("recipe 'card sort' is not in references/recipes.md", result.stderr)
+
     def test_bad_reshape_note_rejected(self):
         request = {"state": "x", "reshape": {"task": ""}, "questions": {"q": {"type": "noul", "instructions": "x?"}}}
         result = run("jev_decide.py", "--dry-run", stdin=json.dumps(request))
