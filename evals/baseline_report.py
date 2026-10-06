@@ -15,7 +15,7 @@ from pathlib import Path
 import grade_evals
 
 SKILL = Path(__file__).resolve().parent.parent
-DECLINE_IDS = {3, 4, 9, 15}  # older cases that predate the `polarity` field
+DECLINE_IDS = {4, 9, 15}  # older cases that predate the `polarity` field
 # From iteration 10 the runner hides every installed or source copy of the skill and shared temp dirs
 # (iteration-10/benchmark.json); earlier baselines could read a copy installed on this machine.
 SANDBOXED_FROM = 10
@@ -25,7 +25,9 @@ SENDS = re.compile(r"\bcurl\b[^\n]*(?:\s-d\b|--data|-X\s*POST|--json)|urlopen|re
 
 def expectations():
     cases = json.loads((SKILL / "evals/evals.json").read_text())["evals"]
-    return {c["id"]: c.get("polarity") == "should_decline" or c["id"] in DECLINE_IDS for c in cases}
+    return {c["id"]: "local" if c.get("polarity") == "local_only"
+            else "decline" if c.get("polarity") == "should_decline" or c["id"] in DECLINE_IDS else "call"
+            for c in cases}
 
 
 def era(iteration):
@@ -33,17 +35,19 @@ def era(iteration):
     return "sandboxed" if not number or int(number) >= SANDBOXED_FROM else "pre-sandbox"
 
 
-def outcome(run, declines):
+def outcome(run, expect):
     """Called: a classifier script ran (live or dry) or a command sent a request to a decision endpoint. Merely
-    naming the skill, searching for it, or reading a URL does not count."""
+    naming the skill, searching for it, or reading a URL does not count. A local-only case is on target when nothing
+    went to a hosted provider: a local model call and a refusal both pass."""
     facts = grade_evals.facts(run)
     commands = [grade_evals.unwrap(e["item"].get("command", ""))
                 for e in grade_evals.json_lines(run / "events.jsonl")
                 if (e.get("item") or {}).get("type") == "command_execution"]
     sent = any(DECISION_HOST.search(c) and SENDS.search(c) for c in commands)
     called = facts["jev_live_call"] or facts["jev_dry_run"] or sent
-    return {"called": called, "skill_read": facts["skill_read"], "on_target": called != declines,
-            "should_call": not declines}
+    on_target = not (facts["hosted_call"] or sent) if expect == "local" else called == (expect == "call")
+    return {"called": called, "skill_read": facts["skill_read"], "on_target": on_target, "expect": expect,
+            "should_call": expect == "call"}
 
 
 def collect(workspace, expected):
@@ -70,19 +74,21 @@ def summary_lines(pairs, label):
     """Should-call and should-decline cases reported apart: on a should-call case a baseline only scores by reaching
     the classifier without this skill, so a blended rate would count that contamination as success."""
     call = {k: v for k, v in pairs.items() if v["with_skill"][0]["should_call"]}
-    decline = {k: v for k, v in pairs.items() if not v["with_skill"][0]["should_call"]}
+    decline = {k: v for k, v in pairs.items() if v["with_skill"][0]["expect"] == "decline"}
+    local = {k: v for k, v in pairs.items() if v["with_skill"][0]["expect"] == "local"}
     runs = lambda group, variant: [r for v in group.values() for r in v[variant]]
     base_call = runs(call, "without_skill")
     return [
         f"### {label}",
         "",
-        f"- Pairs: {len(pairs)} ({len(call)} should-call, {len(decline)} should-decline)",
+        f"- Pairs: {len(pairs)} ({len(call)} should-call, {len(decline)} should-decline, {len(local)} local-only)",
         f"- Should-call, with skill: {rate(runs(call, 'with_skill'))} called the classifier",
         f"- Should-call, without skill: {rate(base_call, 'called')} reached the classifier anyway (a local install or "
         "public sources); these are contaminated, not clean no-skill results. The rest did not reach it, which is "
         "the expected no-skill outcome.",
         f"- Should-decline, with skill: {rate(runs(decline, 'with_skill'))} correctly made no call",
         f"- Should-decline, without skill: {rate(runs(decline, 'without_skill'))} made no call",
+        f"- Local-only, with skill: {rate(runs(local, 'with_skill'))} kept the data off hosted providers",
         "",
     ]
 
@@ -118,8 +124,7 @@ def main():
         "|---|---|---|---|---|---|---|",
     ]
     for (iteration, model, case), v in sorted(paired.items(), key=order):
-        expect = "decline" if expected[case] else "call"
-        lines.append(f"| {iteration.removeprefix('iteration-')} | {model} | {case} | {expect} | "
+        lines.append(f"| {iteration.removeprefix('iteration-')} | {model} | {case} | {expected[case]} | "
                      f"{rate(v['with_skill'])} | {rate(v['without_skill'])} | {rate(v['without_skill'], 'called')} |")
     should_call = [r for r in all_with if r["should_call"]]
     lines += [

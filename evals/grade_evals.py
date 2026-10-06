@@ -69,6 +69,18 @@ def call_log(run):
     }
 
 
+LOCAL_FLAG = re.compile(r"--provider[ =]ollama|--local-only")
+
+
+def hosted_call(records, jev_calls):
+    """True when a call left this machine: a logged call to any provider but Ollama (or an OpenAI-compatible server
+    with --local-only), or a live script run that named neither."""
+    local_only = any("--local-only" in c for c in jev_calls)
+    return (any(r.get("provider") != "ollama" and not (r.get("provider") == "compatible" and local_only)
+                for r in records)
+            or any("--dry-run" not in c and not LOCAL_FLAG.search(c) for c in jev_calls))
+
+
 def facts(run):
     commands, messages = [], []
     for event in json_lines(run / "events.jsonl"):
@@ -89,6 +101,8 @@ def facts(run):
         # the call log is written only by calls that reached the provider, so it is the stronger evidence
         "jev_live_call": log["log_calls"] > 0 or any("--dry-run" not in c for c in jev_calls),
         "jev_dry_run": any("--dry-run" in c for c in jev_calls),
+        # local-only cases: any logged call off this machine, or a live call with no local provider named
+        "hosted_call": hosted_call(json_lines(run / "tmp/calls.jsonl"), jev_calls),
         "recipes_read": any("recipes.md" in c for c in commands),
         "batch_used": any("--batch" in c or "classify_items.py" in c for c in jev_calls),
         "criteria_seen": sorted({k for k in ("same_intent_duplicate", "partial_overlap", "insufficient_context", "none_fit",
