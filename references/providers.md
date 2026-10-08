@@ -1,8 +1,8 @@
 # Providers
 
-Load when switching away from the default Jev provider, connecting a self-hosted or Hugging Face model, or handling data that must stay on this machine.
+Load when switching away from the default Jev provider, running inside Codex, using OpenAI's Decisions API, connecting a self-hosted or Hugging Face model, or handling data that must stay on this machine.
 
-The script sends one request shape and validates one answer shape, whoever answers. A provider is only a place that speaks that shape. Four are built in:
+The script sends one request shape and validates one answer shape, whoever answers. A provider is only a place that speaks that shape (OpenAI's is translated to it and back). Five are built in:
 
 | Provider | Endpoint | Key | Model | Chosen when |
 |---|---|---|---|---|
@@ -10,8 +10,29 @@ The script sends one request shape and validates one answer shape, whoever answe
 | `typesafe` | `https://api.typesafe.ai/v1/systemone` | `TYPESAFE_API_KEY` | pinned `jev-1.13.0` | its key is set and OpenRouter's is not |
 | `ollama` | `http://127.0.0.1:11434/v1/systemone` | none | `nimble:9b` or `--model` | only `--provider ollama` or `CLASSIFIER_PROVIDER=ollama` |
 | `compatible` | `CLASSIFIER_COMPATIBLE_URL` (full request URL) | `CLASSIFIER_COMPATIBLE_KEY`, optional | `CLASSIFIER_COMPATIBLE_MODEL` or `--model` | only `--provider compatible` or `CLASSIFIER_PROVIDER=compatible` |
+| `openai` | `https://api.openai.com/v1/decisions` | `OPENAI_API_KEY` | `gpt-6-luna` (no dated snapshot yet) | inside Codex, with `CLASSIFIER_ROUTE`, or `--provider openai`; never just because its key is set |
 
 `ollama` and `compatible` are never chosen automatically, so configuring local models does not redirect hosted work. Ollama is always restricted to `localhost`, `127.0.0.1`, or `::1`; no flag can point that provider at a remote host. A compatible provider's key goes only to the configured URL's host. It accepts `https://` anywhere and plain `http://` only on loopback.
+
+## OpenAI Decisions and the Codex route
+
+OpenAI's Decisions API (public beta) answers with GPT-6 Luna. Its request and answer shapes differ from System One's, so the script translates both ways: `state` becomes `input` (an object or array is sent as JSON text), question ids become `name`s, `noul` becomes `predicate` (its `true`/`false` descriptions are added to the instructions), and choice options and score levels become `choices` and `levels`. Answers are translated back and checked like any other; a score level whose label is not the level asked at that position, or an option or level listed twice, makes the answer invalid. Structured instructions or descriptions are refused before sending, because Decisions takes only text. A `refusal` answer comes back as `{"type": "refusal"}` and is always flagged for a person.
+
+**Route chain.** Inside Codex, or whenever `CLASSIFIER_ROUTE` is set, the script uses this chain instead of picking one provider:
+
+1. `apikey`: OpenAI Decisions with `OPENAI_API_KEY`.
+2. `openrouter`: Luna through OpenRouter (`openai/gpt-6-luna-decisions-20261006`, System One shape) with `OPENROUTER_API_KEY`.
+
+A step without its key is skipped. The run moves down only when a step's credit runs out (OpenAI `insufficient_quota`, OpenRouter HTTP 402); rate limits, outages, and other errors retry or fail where they are. Each move is printed and recorded in the call log and the `classify_items.py` summary (`route_moves`). Every step answers with Luna, so thresholds and comparisons hold across a move; a `classify_items.py` line is stamped with the model that answered it. `CLASSIFIER_ROUTE=openrouter` starts lower. An explicit `--provider` or `CLASSIFIER_PROVIDER` always wins and uses that provider alone, so `--provider openrouter` inside Codex still means Jev. `--model` and `--endpoint` need `--provider` when the chain is in use, and `classify_items.py` ignores a sheet's `model` pin on the chain (with a warning). `--dry-run` needs no key on the chain.
+
+A ChatGPT sign-in step, using the person's ChatGPT plan before any API key, is planned but not built; it waits on a test that OpenAI's Decisions API accepts "Sign in with ChatGPT" tokens (`context/plan-openai-provider-2026-10-08.md`). The script never reads or reuses Codex's own login (`~/.codex/auth.json`).
+
+**Codex.** The script treats a run as inside Codex when `CLASSIFIER_HOST=codex`, or when `CODEX_THREAD_ID` is set and `CLAUDECODE` is not (a Claude worker launched from Codex keeps the normal choice). `CLASSIFIER_HOST=other` turns the Codex route off. Two Codex defaults get in the way:
+
+- Codex hides environment variables whose names contain `KEY`, `SECRET`, or `TOKEN` from the commands it runs, so `OPENAI_API_KEY` and `OPENROUTER_API_KEY` may not arrive. Without either, the script stops with exit 1 and names the variables. Let the variable through in Codex's `shell_environment_policy` without turning the filter off for every secret.
+- Codex's sandbox may block network access; ask for approval to run classifier calls outside it.
+
+**Calibration.** Luna's review thresholds are not yet calibrated on labeled samples, so its answers get a stricter review rule: a wider close-runner-up margin (+0.1), a wider noul band (0.3–0.7), and a score-confidence bar of 0.6. Run the `calibrate` recipe on Luna before automating anything with it.
 
 ## Ollama System One
 
@@ -55,4 +76,4 @@ Answers from different models are not comparable: a threshold tuned on Jev does 
 
 ## Contract status
 
-The OpenRouter Decisions endpoint is alpha (contract last verified 2026-09-23; re-check when a call fails validation or every 90 days). TypeSafe's direct API shares the same request and answer shapes (per its docs, 2026-09-23; not yet exercised by this skill). Ollama System One was contract-tested from its documented response shape on 2026-09-30. If a contract changes, consult the current [TypeSafe API reference](https://docs.typesafe.ai/api), [TypeSafe agent documentation](https://docs.typesafe.ai/agent-skill), [OpenRouter Jev example](https://openrouter.ai/labs/jev/compile), or [Ollama decision-model documentation](https://ollama.com/library/nimble) before changing the wrapper.
+The OpenRouter Decisions endpoint is alpha (contract last verified 2026-09-23; re-check when a call fails validation or every 90 days). Luna on OpenRouter's endpoint passed answer validation in a live call on 2026-10-08. OpenAI's Decisions API is a public beta, translated from its documented shapes (2026-10-08); its limits, error body, rate-limit headers, and refusal schema are undocumented and not yet exercised by this skill, so its first live calls should be small. See the [OpenAI Decisions guide](https://developers.openai.com/api/docs/guides/decisions). TypeSafe's direct API shares the same request and answer shapes (per its docs, 2026-09-23; not yet exercised by this skill). Ollama System One was contract-tested from its documented response shape on 2026-09-30. If a contract changes, consult the current [TypeSafe API reference](https://docs.typesafe.ai/api), [TypeSafe agent documentation](https://docs.typesafe.ai/agent-skill), [OpenRouter Jev example](https://openrouter.ai/labs/jev/compile), or [Ollama decision-model documentation](https://ollama.com/library/nimble) before changing the wrapper.

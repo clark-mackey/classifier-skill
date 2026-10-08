@@ -1,11 +1,11 @@
 # classifier-skill
 
-An agent skill for asking a non-generative classifier model for a typed answer: pick one option, say yes or no, or place something on a scale. The default classifier is TypeSafe Jev, reached through OpenRouter or TypeSafe's own API. It returns probabilities, not prose, so answers are cheap (about $0.00002 each), quick, and easy to act on in code.
+An agent skill for asking a non-generative classifier model for a typed answer: pick one option, say yes or no, or place something on a scale. The default classifier is TypeSafe Jev, reached through OpenRouter or TypeSafe's own API. Inside Codex it uses OpenAI's Decisions API (GPT-6 Luna) instead. It returns probabilities, not prose, so answers are cheap (about $0.00002 each), quick, and easy to act on in code.
 
 The skill works in any skills-compatible agent and with any working model. It needs Python 3 plus either network access to OpenRouter or TypeSafe, or Ollama 0.35+ with a supported local decision model.
 
 > [!WARNING]
-> **Hosted providers send data to a third party.** Calls through OpenRouter or TypeSafe send the `state` you supply (item text, facts, summaries) to a cloud service outside your control. Their own retention and logging policies apply. The explicit `ollama` provider stays on loopback.
+> **Hosted providers send data to a third party.** Calls through OpenRouter, TypeSafe, or OpenAI send the `state` you supply (item text, facts, summaries) to a cloud service outside your control. Their own retention and logging policies apply. The explicit `ollama` provider stays on loopback.
 >
 > **Do not expose hosted credentials where every classification must stay local.** An agent may load the skill on its own when a task looks like classification, and other skills can call its script directly. Keep `OPENROUTER_API_KEY` and `TYPESAFE_API_KEY` unset, or block outbound network access, in a strictly local environment.
 >
@@ -39,7 +39,7 @@ Prerequisites:
 
 - A skills-compatible agent
 - Python 3 and Git
-- One classifier route: an OpenRouter or TypeSafe API key, or Ollama 0.35+ with a supported decision model such as `nimble:9b`. The skill uses `--provider`, then `CLASSIFIER_PROVIDER`, then whichever hosted key exists; local providers are never selected implicitly.
+- One classifier route: an OpenRouter, TypeSafe, or OpenAI API key, or Ollama 0.35+ with a supported decision model such as `nimble:9b`. The skill uses `--provider`, then `CLASSIFIER_PROVIDER`, then (inside Codex or with `CLASSIFIER_ROUTE`) the OpenAI route, then whichever hosted key exists; local providers are never selected implicitly.
 
 Use the agent skill installer:
 

@@ -12,10 +12,16 @@ from unittest import mock
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+NOT_CODEX = {"CLASSIFIER_HOST": "other", "CLASSIFIER_ROUTE": "", "OPENAI_API_KEY": ""}
+
+
+def setUpModule():
+    os.environ.update(NOT_CODEX)  # in-process tests too: a suite run inside Codex must not take the Codex route
 
 
 def run(script, *args, stdin=None, env=None):
-    env = {**os.environ, "CLASSIFIER_SKILL_LOG": "off", **(env or {})}  # tests never touch the real call log
+    # tests never touch the real call log, and never take the Codex route unless a test asks for it
+    env = {**os.environ, "CLASSIFIER_SKILL_LOG": "off", **NOT_CODEX, **(env or {})}
     return subprocess.run([sys.executable, str(SCRIPTS / script), *args], input=stdin,
                           capture_output=True, text=True, env=env)
 
@@ -609,7 +615,7 @@ class CallerContract(unittest.TestCase):
                 return False
 
         out, err = io.StringIO(), io.StringIO()
-        env = {"OPENROUTER_API_KEY": "test-not-a-key", "CLASSIFIER_SKILL_LOG": log}
+        env = {"OPENROUTER_API_KEY": "test-not-a-key", "CLASSIFIER_SKILL_LOG": log, **NOT_CODEX}
         with mock.patch.object(module.urllib.request, "urlopen", lambda req, timeout: Response(queue.pop(0))), \
                 mock.patch.object(sys, "argv", ["jev_decide.py", *argv]), \
                 mock.patch.object(sys, "stdin", io.StringIO(json.dumps(request))), \
@@ -1059,7 +1065,7 @@ class ItemsEngine(unittest.TestCase):
                     mock.patch.object(module.jev.time, "sleep"), mock.patch.object(sys, "argv", argv), \
                     mock.patch.object(sys, "stderr", err), \
                     mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-not-a-key",
-                                                 "CLASSIFIER_SKILL_LOG": "off", **(env or {})}):
+                                                 "CLASSIFIER_SKILL_LOG": "off", **NOT_CODEX, **(env or {})}):
                 try:
                     module.main()
                 except SystemExit as exc:
@@ -1076,7 +1082,7 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([l["id"] for l in lines], [i["term"] for i in self.ITEMS])
         self.assertTrue(all(l["versions"] == {"sheet": "test-terms@2", "recipe": None, "model": "typesafe/jev-1.13",
-                                              "contract": "1.7", "context": "02f189c76132"} for l in lines))
+                                              "contract": "1.8", "context": "02f189c76132"} for l in lines))
         self.assertEqual((summary["complete"], summary["items_in"], summary["items_out"], summary["answered"]),
                          (True, 4, 4, 4))
         self.assertIn("Classifier: 4/0/0 (none)", err)
@@ -1195,7 +1201,7 @@ class ItemsEngine(unittest.TestCase):
 
     def test_contract_version(self):
         result = run("classify_items.py", "--contract-version")
-        self.assertEqual(result.stdout.strip(), "1.7")
+        self.assertEqual(result.stdout.strip(), "1.8")
 
     def test_context_file_replaces_sheet_context(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1657,3 +1663,255 @@ class ScoreLabelArguments(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OpenAIRoute(unittest.TestCase):
+    """OpenAI Decisions provider, the route chain, and Codex routing. Replies are recorded shapes, never live calls."""
+
+    QUESTIONS = {
+        "refund": {"type": "noul", "instructions": "Refund asked?", "criteria": {"true": "asks", "false": "does not"}},
+        "dept": {"type": "choice", "instructions": "Team?", "criteria": {"billing": "payments", "other": None}},
+        "sev": {"type": "score", "instructions": "Urgent?", "criteria": ["low", "high"]},
+    }
+    OPENAI_REPLY = {"model": "gpt-6-luna", "usage": {"input_tokens": 50}, "answers": [
+        {"type": "predicate", "name": "refund", "probability": 0.9},
+        {"type": "choice", "name": "dept", "choice": "billing", "confidence": 0.9,
+         "probabilities": [{"value": "billing", "probability": 0.95}, {"value": "other", "probability": 0.05}]},
+        {"type": "score", "name": "sev", "score": 0.2, "confidence": 0.8,
+         "probabilities": [{"value": 0, "label": "low", "probability": 0.8},
+                           {"value": 1, "label": "high", "probability": 0.2}]}]}
+    SYSTEM_ONE_REPLY = {"model": "openai/gpt-6-luna-decisions-20261006", "answers": {
+        "refund": {"type": "noul", "noul": 0.9},
+        "dept": {"type": "choice", "choice": "billing", "confidence": 0.9,
+                 "probabilities": {"billing": 0.95, "other": 0.05}},
+        "sev": {"type": "score", "score": 0.2, "confidence": 0.8, "probabilities": {"0": 0.8, "1": 0.2}}}}
+
+    def setUp(self):
+        self.module = load_module()
+
+    def env(self, **values):
+        base = {"CLASSIFIER_HOST": "", "CLASSIFIER_ROUTE": "", "CLASSIFIER_PROVIDER": "", "CODEX_THREAD_ID": "",
+                "CLAUDECODE": "", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": "", "TYPESAFE_API_KEY": ""}
+        return mock.patch.dict(os.environ, {**base, **values})
+
+    def http_error(self, code, body):
+        return self.module.urllib.error.HTTPError("https://x", code, "err", {}, io.BytesIO(body.encode()))
+
+    def test_request_translates_to_openai_shape(self):
+        payload = {"model": "gpt-6-luna", "state": {"item": "x"}, "questions": self.QUESTIONS}
+        body = self.module.to_openai_request(payload)
+        self.assertEqual(body["input"], '{"item": "x"}')
+        by_name = {q["name"]: q for q in body["questions"]}
+        self.assertEqual(by_name["refund"]["type"], "predicate")
+        self.assertIn("True means: asks", by_name["refund"]["instructions"])
+        self.assertEqual(by_name["dept"]["choices"], [{"value": "billing", "description": "payments"},
+                                                      {"value": "other", "description": "other"}])
+        self.assertEqual([l["label"] for l in by_name["sev"]["levels"]], ["low", "high"])
+
+    def test_response_translates_back_and_validates(self):
+        response = self.module.from_openai_response(self.OPENAI_REPLY, "gpt-6-luna", self.QUESTIONS)
+        self.assertEqual(self.module.response_errors(response, self.QUESTIONS), [])
+        self.assertEqual(response["answers"], self.SYSTEM_ONE_REPLY["answers"])
+
+    def test_malformed_or_duplicate_answers_are_invalid(self):
+        broken = {**self.OPENAI_REPLY, "answers": [{"type": "choice", "name": "dept", "probabilities": 3}]}
+        duplicate = {**self.OPENAI_REPLY, "answers": self.OPENAI_REPLY["answers"] + [self.OPENAI_REPLY["answers"][0]]}
+        for raw in (broken, duplicate):
+            response = self.module.from_openai_response(raw, "gpt-6-luna", self.QUESTIONS)
+            self.assertTrue(self.module.response_errors(response, self.QUESTIONS))
+
+    def test_score_labels_and_repeated_values_are_checked(self):
+        score = self.OPENAI_REPLY["answers"][2]
+        swapped = {**score, "probabilities": [{"value": 0, "label": "high", "probability": 0.8},
+                                              {"value": 1, "label": "low", "probability": 0.2}]}
+        repeated_choice = {**self.OPENAI_REPLY["answers"][1], "probabilities": [
+            {"value": "billing", "probability": 0.5}, {"value": "billing", "probability": 0.5}]}
+        for answers in ([self.OPENAI_REPLY["answers"][0], self.OPENAI_REPLY["answers"][1], swapped],
+                        [self.OPENAI_REPLY["answers"][0], repeated_choice, score]):
+            response = self.module.from_openai_response({**self.OPENAI_REPLY, "answers": answers}, "gpt-6-luna",
+                                                        self.QUESTIONS)
+            self.assertTrue(self.module.response_errors(response, self.QUESTIONS))
+
+    def test_dry_run_on_the_chain_needs_no_key(self):
+        request = json.dumps({"state": "x", "questions": {"q": {"type": "noul", "instructions": "x?"}}})
+        result = run("jev_decide.py", "--dry-run", stdin=request,
+                     env={"CLASSIFIER_HOST": "codex", "OPENAI_API_KEY": "", "OPENROUTER_API_KEY": ""})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["model"], "gpt-6-luna")
+
+    def test_refusal_is_valid_and_goes_to_a_person(self):
+        raw = {**self.OPENAI_REPLY, "answers": [{"type": "refusal", "name": "refund"}] + self.OPENAI_REPLY["answers"][1:]}
+        response = self.module.from_openai_response(raw, "gpt-6-luna", self.QUESTIONS)
+        self.assertEqual(self.module.response_errors(response, self.QUESTIONS), [])
+        review = self.module.review_flags(response["answers"], 0.2, response["model"])
+        self.assertIn("refund", review)
+        self.assertEqual(self.module.decisions(response["answers"], review, 0.8)["refund"], "human")
+
+    def test_structured_text_refused_for_openai_before_sending(self):
+        questions = {"q": {"type": "choice", "instructions": "x?", "criteria": {"a": {"desc": "rich"}, "b": None}}}
+        with mock.patch.object(sys, "stderr", io.StringIO()), self.assertRaises(SystemExit) as caught:
+            self.module.check_provider_limits({"questions": questions}, "openai")
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_uncalibrated_luna_is_reviewed_more_strictly(self):
+        answers = {"q": {"type": "noul", "noul": 0.68}}
+        self.assertEqual(self.module.review_flags(answers, 0.2, "typesafe/jev-1.13"), {})
+        self.assertIn("q", self.module.review_flags(answers, 0.2, "gpt-6-luna"))
+
+    def test_host_detection(self):
+        cases = (({}, "other"), ({"CODEX_THREAD_ID": "t1"}, "codex"),
+                 ({"CODEX_THREAD_ID": "t1", "CLAUDECODE": "1"}, "other"),  # a Claude worker launched from Codex
+                 ({"CLASSIFIER_HOST": "codex"}, "codex"),
+                 ({"CODEX_THREAD_ID": "t1", "CLASSIFIER_HOST": "other"}, "other"))
+        for values, host in cases:
+            with self.subTest(values=values), self.env(**values):
+                self.assertEqual(self.module.detect_host()[0], host)
+
+    def test_route_choice(self):
+        luna = self.module.LUNA_ON_OPENROUTER
+        cases = (
+            ({"CODEX_THREAD_ID": "t", "OPENAI_API_KEY": "k", "OPENROUTER_API_KEY": "k"},
+             [("openai", "gpt-6-luna"), ("openrouter", luna)]),
+            ({"CODEX_THREAD_ID": "t", "OPENROUTER_API_KEY": "k"}, [("openrouter", luna)]),  # never Jev in Codex
+            ({"CODEX_THREAD_ID": "t", "OPENAI_API_KEY": "k", "CLASSIFIER_ROUTE": "openrouter",
+              "OPENROUTER_API_KEY": "k"}, [("openrouter", luna)]),
+            ({"CODEX_THREAD_ID": "t", "OPENROUTER_API_KEY": "k", "CLASSIFIER_PROVIDER": "openrouter"},
+             [("openrouter", None)]),  # explicit wins, with the provider's own pinned model
+            ({"OPENROUTER_API_KEY": "k", "OPENAI_API_KEY": "k"}, [("openrouter", None)]),  # outside Codex unchanged
+            ({"OPENAI_API_KEY": "k"}, [("openrouter", None)]),  # a stray OpenAI key never picks OpenAI
+            ({"OPENAI_API_KEY": "k", "CLASSIFIER_ROUTE": "apikey"}, [("openai", "gpt-6-luna")]),
+        )
+        for values, steps in cases:
+            with self.subTest(values=values), self.env(**values):
+                self.assertEqual(self.module.plan_route(None)["steps"], steps)
+
+    def test_codex_without_credentials_stops_with_the_fix(self):
+        with self.env(CODEX_THREAD_ID="t"), mock.patch.object(sys, "stderr", io.StringIO()) as err, \
+                self.assertRaises(SystemExit) as caught:
+            self.module.plan_route(None)
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn("OPENAI_API_KEY or OPENROUTER_API_KEY", err.getvalue())
+
+    def test_chatgpt_route_not_offered_yet(self):
+        with self.env(CLASSIFIER_ROUTE="chatgpt"), mock.patch.object(sys, "stderr", io.StringIO()) as err, \
+                self.assertRaises(SystemExit):
+            self.module.plan_route(None)
+        self.assertIn("not built yet", err.getvalue())
+
+    def test_quota_moves_down_the_chain_and_rate_limits_do_not(self):
+        sent = []
+        replies = [self.http_error(429, '{"error": {"code": "insufficient_quota"}}'), self.SYSTEM_ONE_REPLY]
+
+        class Response:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return io.BytesIO(json.dumps(self.body).encode())
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(request, timeout):
+            sent.append((request.full_url, json.loads(request.data)))
+            reply = replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return Response(reply)
+
+        payload = {"model": "gpt-6-luna", "state": "x", "questions": self.QUESTIONS}
+        with self.env(CODEX_THREAD_ID="t", OPENAI_API_KEY="k1", OPENROUTER_API_KEY="k2"), \
+                mock.patch.object(self.module.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(self.module.time, "sleep"), mock.patch.object(sys, "stderr", io.StringIO()):
+            router = self.module.Router(self.module.plan_route(None), None, 5)
+            response = router.send(payload)
+        self.assertEqual([url for url, _ in sent], ["https://api.openai.com/v1/decisions",
+                                                    "https://openrouter.ai/api/alpha/decisions"])
+        self.assertEqual(sent[1][1]["model"], self.module.LUNA_ON_OPENROUTER)
+        self.assertEqual(router.moves, [{"from": "openai", "to": "openrouter", "reason": "exhausted"}])
+        self.assertEqual(self.module.response_errors(response, self.QUESTIONS), [])
+
+        replies[:] = [self.http_error(429, '{"error": {"code": "rate_limit_exceeded"}}'), self.OPENAI_REPLY]
+        sent.clear()
+        with self.env(CODEX_THREAD_ID="t", OPENAI_API_KEY="k1", OPENROUTER_API_KEY="k2"), \
+                mock.patch.object(self.module.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(self.module.time, "sleep"):
+            router = self.module.Router(self.module.plan_route(None), None, 5)
+            router.send(payload)
+        self.assertEqual({url for url, _ in sent}, {"https://api.openai.com/v1/decisions"})  # retried, never moved
+        self.assertEqual(router.moves, [])
+
+    def test_last_step_exhausted_stops(self):
+        def urlopen(request, timeout):
+            raise self.http_error(402, '{"error": "insufficient credits"}')
+
+        with self.env(CODEX_THREAD_ID="t", OPENROUTER_API_KEY="k"), \
+                mock.patch.object(self.module.urllib.request, "urlopen", urlopen), \
+                self.assertRaises(self.module.Exhausted) as caught:
+            self.module.Router(self.module.plan_route(None), None, 5).send(
+                {"model": "m", "state": "x", "questions": self.QUESTIONS})
+        self.assertEqual(self.module.failure_kind(caught.exception), "exhausted")
+
+    def test_openai_key_never_leaves_its_host_and_local_only_refuses(self):
+        request = json.dumps({"state": "x", "questions": {"q": {"type": "noul", "instructions": "x?"}}})
+        result = run("jev_decide.py", "--provider", "openai", "--endpoint", "https://openrouter.ai/api/alpha/decisions",
+                     stdin=request, env={"OPENAI_API_KEY": "k"})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("refusing to send credentials", result.stderr)
+        result = run("jev_decide.py", "--provider", "openai", "--local-only", stdin=request, env={"OPENAI_API_KEY": "k"})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("--local-only", result.stderr)
+        result = run("jev_decide.py", "--local-only", stdin=request,
+                     env={"CLASSIFIER_HOST": "codex", "OPENROUTER_API_KEY": "k"})
+        self.assertEqual(result.returncode, 1)  # every chain step is checked, not only the first
+
+    def test_items_engine_moves_mid_run_and_stamps_the_answering_model(self):
+        spec = importlib.util.spec_from_file_location("classify_items", SCRIPTS / "classify_items.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        replies = [self.OPENAI_REPLY, self.http_error(429, '{"error": {"code": "insufficient_quota"}}'),
+                   self.SYSTEM_ONE_REPLY, self.SYSTEM_ONE_REPLY]
+
+        class Response:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return io.BytesIO(json.dumps(self.body).encode())
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(request, timeout):
+            sent.append(json.loads(request.data)["model"])
+            reply = replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return Response(reply)
+
+        sheet = {"sheet": "t", "version": 1, "contract": "1.8", "data": "cloud_ok", "min_items": 1,
+                 "model": "typesafe/jev-1.13",  # a pin must not put Jev on the chain's OpenRouter step
+                 "fields": {"card": ["text"]}, "questions": self.QUESTIONS}
+        dated = {**self.OPENAI_REPLY, "model": "gpt-6-luna-2026-10-01"}
+        replies[0] = dated
+        sent = []
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {n: Path(tmp) / n for n in ("s.json", "i.jsonl", "o.jsonl", "sum.json")}
+            paths["s.json"].write_text(json.dumps(sheet))
+            paths["i.jsonl"].write_text("".join(json.dumps({"id": n, "text": f"t{n}"}) + "\n" for n in range(3)))
+            argv = ["classify_items.py", "--sheet", str(paths["s.json"]), "--items", str(paths["i.jsonl"]),
+                    "--out", str(paths["o.jsonl"]), "--summary", str(paths["sum.json"])]
+            with self.env(CODEX_THREAD_ID="t", OPENAI_API_KEY="k1", OPENROUTER_API_KEY="k2",
+                          CLASSIFIER_SKILL_LOG="off"), \
+                    mock.patch.object(module.jev.urllib.request, "urlopen", urlopen), \
+                    mock.patch.object(module.jev.time, "sleep"), mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(sys, "stderr", io.StringIO()):
+                module.main()
+            lines = [json.loads(l) for l in paths["o.jsonl"].read_text().splitlines()]
+            summary = json.loads(paths["sum.json"].read_text())
+        self.assertEqual([l["status"] for l in lines], ["answered"] * 3)
+        luna = self.module.LUNA_ON_OPENROUTER
+        self.assertEqual(sent, ["gpt-6-luna", "gpt-6-luna", luna, luna])
+        self.assertEqual([l["versions"]["model"] for l in lines], ["gpt-6-luna-2026-10-01", luna, luna])
+        self.assertEqual(summary["route_moves"], [{"from": "openai", "to": "openrouter", "reason": "exhausted"}])
+        self.assertTrue(summary["complete"])

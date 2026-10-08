@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Judge a list of items with a question sheet: items JSONL in, one stamped line per item out, plus a summary.
 
-This is the engine behind the sheet procedure (references/sheets.md) and contract 1.7 (references/callers.md). A caller supplies
+This is the engine behind the sheet procedure (references/sheets.md) and contract 1.8 (references/callers.md). A caller supplies
 data only: a sheet (questions, which item fields go on each card, thresholds, data rule) and the items. Everything else
 stays in here: cards, redaction, size limits, provider choice, retries, answer validation, and dispositions.
 
@@ -182,6 +182,8 @@ def sheet_model(sheet: dict[str, Any], provider: str) -> str | None:
 
 
 def call_reason(exc: jev.CallError) -> str:
+    if isinstance(exc, jev.Exhausted):
+        return "exhausted"
     status = getattr(exc.__cause__, "code", None)
     if status == 413:
         return "too_large"
@@ -194,13 +196,14 @@ def blocked_reason(args: argparse.Namespace, sheet: dict[str, Any]) -> str | Non
     """A reason no item can be sent at all, found before anything is sent; None when calls may proceed."""
     if args.dry_run:
         return None
-    if sheet["data"] == "local_only" and not jev.is_local(args.endpoint):
-        print(f"classifier-skill: sheet is local_only; refusing to send to {args.endpoint!r}", file=sys.stderr)
-        return "refused_host"
-    try:
-        jev.check_endpoint(args.provider, args.endpoint)
-    except SystemExit:
-        return "refused_host"
+    for provider, endpoint in args.router.endpoints():  # every step a route chain may move to
+        if sheet["data"] == "local_only" and not jev.is_local(endpoint):
+            print(f"classifier-skill: sheet is local_only; refusing to send to {endpoint!r}", file=sys.stderr)
+            return "refused_host"
+        try:
+            jev.check_endpoint(provider, endpoint)
+        except SystemExit:
+            return "refused_host"
     spec = jev.PROVIDERS[args.provider]
     key_env = spec.get("key")
     if not spec.get("key_optional") and not os.environ.get(key_env or "", "").strip():
@@ -255,13 +258,23 @@ def main() -> None:
         if not sheet["context"]:
             jev.fail("context file is empty")
     items = load_items(args.items, sheet["fields"])
-    args.provider = jev.select_provider(args.provider)
+    plan = jev.plan_route(args.provider, dry_run=args.dry_run)
+    # The route chain answers with one model family on every step, so a sheet's model pin applies only to a run on
+    # one named provider; it would otherwise put Jev on the chain's OpenRouter step.
+    if plan["route"] and sheet.get("model"):
+        print("classifier-skill: ignoring the sheet's model pin on the route chain; each step uses its own pinned "
+              "model (name a provider to use the pin)", file=sys.stderr)
+    args.router = jev.Router(plan, None, args.timeout)
+    args.provider = args.router.provider
     spec = jev.PROVIDERS[args.provider]
-    args.endpoint = jev.provider_endpoint(args.provider)
-    model = sheet_model(sheet, args.provider) or spec.get("model") or os.environ.get(spec.get("model_env", ""), "").strip()
+    args.endpoint = args.router.current_endpoint()
+    model = ((None if plan["route"] else sheet_model(sheet, args.provider)) or plan["steps"][0][1]
+             or spec.get("model") or os.environ.get(spec.get("model_env", ""), "").strip())
     template = jev.normalize_request({"questions": questions}, None, batch=True, default_model=model)
-    jev.check_provider_limits(template, args.provider)
-    for field in sorted(set(template) - spec.get("fields", jev.ALLOWED_FIELDS)):
+    for provider, _ in plan["steps"]:
+        jev.check_provider_limits(template, provider)
+    accepted = set.intersection(*(set(jev.PROVIDERS[p].get("fields", jev.ALLOWED_FIELDS)) for p, _ in plan["steps"]))
+    for field in sorted(set(template) - accepted):
         template.pop(field)
     versions = {"sheet": f"{sheet['sheet']}@{sheet['version']}", "recipe": sheet.get("recipe"),
                 "model": model, "contract": jev.CONTRACT_VERSION,
@@ -276,8 +289,12 @@ def main() -> None:
     stopped = "below_min_items" if bypass else blocked_reason(args, sheet)
 
     with out_path.open("w", encoding="utf-8") as out:
-        def emit(record: dict[str, Any]) -> None:
-            out.write(json.dumps({**record, "versions": versions}, ensure_ascii=False, sort_keys=True) + "\n")
+        def emit(record: dict[str, Any], answered_by: Any = None) -> None:
+            # each answered line carries the model id the provider reported (drift and route moves show per line);
+            # other lines carry the model the current step would request
+            stamped = {**versions, "model": answered_by if isinstance(answered_by, str) and answered_by
+                       else args.router.model(model)}
+            out.write(json.dumps({**record, "versions": stamped}, ensure_ascii=False, sort_keys=True) + "\n")
             out.flush()
             counts["written"] += 1
 
@@ -299,7 +316,8 @@ def main() -> None:
             payload = {**template, "state": state}
             try:
                 jev.check_size(payload, f"item {item_id!r}")
-                jev.check_provider_limits(payload, args.provider, f"item {item_id!r}")
+                for provider, _ in plan["steps"]:
+                    jev.check_provider_limits(payload, provider, f"item {item_id!r}")
             except SystemExit:
                 unanswered(item_id, "too_large")
                 continue
@@ -307,7 +325,7 @@ def main() -> None:
                 emit({"id": item_id, "status": "dry_run", "payload": payload})
                 continue
             try:
-                response = jev.call_jev(payload, args.endpoint, args.timeout, args.provider)
+                response = args.router.send(payload)
             except jev.CallError as exc:
                 print(f"classifier-skill: item {item_id!r}: {exc.message}", file=sys.stderr)
                 reason = call_reason(exc)
@@ -323,21 +341,23 @@ def main() -> None:
             tokens += jev.usage_tokens(response)
             if isinstance(response.get("model"), str):
                 models.add(response["model"])
-            review = jev.review_flags(answers, float(sheet.get("margin", 0.2)))
+            review = jev.review_flags(answers, float(sheet.get("margin", 0.2)), response.get("model"))
             marks = dispositions(answers, review, thresholds)
             counts["answered"] += 1
             flagged += bool(review)
             for qid, mark in marks.items():
                 if mark in ("human", "skip"):
                     counts[mark][qid] = counts[mark].get(qid, 0) + 1
-            emit({"id": item_id, "status": "answered", "answers": answers, "dispositions": marks, "review": review})
+            emit({"id": item_id, "status": "answered", "answers": answers, "dispositions": marks, "review": review},
+                 response.get("model"))
 
     failed = {r: n for r, n in counts["unanswered"].items() if r not in EXPECTED}
+    args.provider, args.route_log = args.router.provider, args.router.log_fields()
     summary = {
         # every path through the loop emits exactly one line, so this is a self-check: false only if a future change
         # drops an item, and a caller must then distrust the output file
         "run_id": run_id, "complete": counts["written"] == len(items), "dry_run": args.dry_run,
-        "provider": args.provider, **versions,
+        "provider": args.provider, "route": plan["route"], "route_moves": args.router.moves, **versions,
         "items_in": len(items), "items_out": counts["written"], "answered": counts["answered"],
         "human_by_question": counts["human"], "skip_by_question": counts["skip"],
         "unanswered": counts["unanswered"], "bypass": bypass, "degraded": bool(failed),

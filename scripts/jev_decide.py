@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Call a typed decision model through OpenRouter, TypeSafe, Ollama, or a compatible System One API.
+"""Call a typed decision model through OpenRouter, TypeSafe, OpenAI Decisions, Ollama, or a compatible System One API.
 
 Every response is checked against the questions asked before it is printed; a malformed answer exits 3 (or, in
 batch mode, marks that line "invalid") so callers never act on it. Every response also gains a top-level "review"
@@ -42,7 +42,22 @@ PROVIDERS = {
     "compatible": {"url_env": "CLASSIFIER_COMPATIBLE_URL", "key": "CLASSIFIER_COMPATIBLE_KEY",
                    "model_env": "CLASSIFIER_COMPATIBLE_MODEL", "name": "compatible server",
                    "key_optional": True, "explicit": True, "fields": {"model", "state", "questions"}},
+    # OpenAI's Decisions API speaks its own shape; call_jev translates to it and back (to_openai_request,
+    # from_openai_response), so callers and answer checks see the System One shape. `gpt-6-luna` is the only model and
+    # has no dated snapshot yet, so the response model id is recorded to catch drift.
+    "openai": {"endpoint": "https://api.openai.com/v1/decisions", "host": "api.openai.com", "key": "OPENAI_API_KEY",
+               "model": "gpt-6-luna", "name": "OpenAI", "explicit": True, "shape": "openai",
+               "fields": {"model", "state", "questions"}},
 }
+# Luna served by OpenRouter in the System One shape: the OpenRouter step of the route chain, so a run that moves down
+# the chain keeps one model family (thresholds and caches stay valid).
+LUNA_ON_OPENROUTER = "openai/gpt-6-luna-decisions-20261006"
+# The route chain for OpenAI work, in order. A run moves down only when a step's credit or plan is used up
+# (`Exhausted`); a step whose credential is absent is skipped. The ChatGPT sign-in step will go first once it is
+# built (context/plan-openai-provider-2026-10-08.md, Phase 3A).
+ROUTES = {"apikey": ("openai", PROVIDERS["openai"]["model"]), "openrouter": ("openrouter", LUNA_ON_OPENROUTER)}
+# Model families whose review thresholds have not been calibrated on labeled samples get a stricter review rule.
+UNCALIBRATED_FAMILIES = {"luna"}
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}  # the only hosts plain http and --local-only accept
 MAX_RETRY_AFTER = 10.0  # seconds; a longer retry-after ends the call with an error instead of being waited out
 FALLBACK_OPTIONS = {"insufficient_context", "insufficient_evidence", "none_fit"}
@@ -76,7 +91,7 @@ REDACTIONS = (
 SECRET_KEY = re.compile(rf"(?i)(?:x-)?(?:{SECRET_KEYS})")  # an object field whose whole name is a secret key
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.7"
+CONTRACT_VERSION = "1.8"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -104,6 +119,15 @@ class CallError(SystemExit):
     def __init__(self, message: str):
         super().__init__(1)
         self.message = message
+
+
+class Exhausted(CallError):
+    """The provider's credit, quota, or plan allowance is used up (OpenRouter 402, OpenAI `insufficient_quota`).
+    Retrying cannot help; a route chain moves to its next step instead."""
+
+
+def is_exhausted(status: int, body: str) -> bool:
+    return status == 402 or (status == 429 and "insufficient_quota" in body)
 
 
 def load_request(path: str) -> dict[str, Any]:
@@ -168,6 +192,95 @@ def select_provider(requested: str | None) -> str:
     return "openrouter"
 
 
+def detect_host() -> tuple[str, str]:
+    """("codex" | "other", reason). CLASSIFIER_HOST decides when set. Otherwise Codex's CODEX_THREAD_ID counts only
+    when Claude Code is not the one running (a Claude worker launched from Codex inherits that variable)."""
+    configured = os.environ.get("CLASSIFIER_HOST", "").strip().lower()
+    if configured:
+        if configured not in {"codex", "other"}:
+            fail(f"CLASSIFIER_HOST must be codex or other, not {configured!r}")
+        return configured, "CLASSIFIER_HOST"
+    if os.environ.get("CODEX_THREAD_ID", "").strip() and not os.environ.get("CLAUDECODE", "").strip():
+        return "codex", "CODEX_THREAD_ID"
+    return "other", "default"
+
+
+def plan_route(requested: str | None, model_override: str | None = None, dry_run: bool = False) -> dict[str, Any]:
+    """Which provider(s) a run may use. An explicit provider (--provider or CLASSIFIER_PROVIDER) is used alone. Inside
+    Codex, or when CLASSIFIER_ROUTE is set, the run uses the route chain (ROUTES) from CLASSIFIER_ROUTE's step on,
+    skipping steps without a credential; OpenRouter's Jev is never used automatically there. Otherwise one provider, as
+    before. A dry run keeps every step, since it sends nothing and needs no credential. Returns
+    {"steps": [(provider, model or None)], "host", "host_reason", "route"}."""
+    host, host_reason = detect_host()
+    start = os.environ.get("CLASSIFIER_ROUTE", "").strip().lower()
+    if start and start not in ROUTES:
+        hint = "; the ChatGPT sign-in route is not built yet" if start == "chatgpt" else ""
+        fail(f"CLASSIFIER_ROUTE must be one of: {', '.join(ROUTES)}{hint}")
+    explicit = requested or os.environ.get("CLASSIFIER_PROVIDER", "").strip().lower() or None
+    info = {"host": host, "host_reason": host_reason}
+    if explicit or not (start or host == "codex"):
+        return {**info, "route": None, "steps": [(select_provider(explicit), None)]}
+    if model_override:
+        fail("--model needs --provider when the route chain is in use (each step has its own pinned model)")
+    names = list(ROUTES)[list(ROUTES).index(start or "apikey"):]
+    usable = [name for name in names
+              if dry_run or os.environ.get(PROVIDERS[ROUTES[name][0]]["key"], "").strip()]
+    steps = [ROUTES[name] for name in usable]
+    if not steps:
+        keys = " or ".join(PROVIDERS[ROUTES[name][0]]["key"] for name in names)
+        where = (" Inside Codex, variables whose names contain KEY are hidden from commands unless the Codex "
+                 "configuration lets them through (references/providers.md, Codex).") if host == "codex" else ""
+        fail(f"no credential for the OpenAI route: set {keys}, or choose a provider with --provider.{where}", code=1)
+    return {**info, "route": usable[0], "steps": steps}
+
+
+class Router:
+    """Sends each request on the current step of a route plan and moves to the next step when a step is used up.
+    The one send path for jev_decide.py and classify_items.py, so every request gets the same choice and fallback."""
+
+    def __init__(self, plan: dict[str, Any], endpoint: str | None, timeout: float,
+                 model_for: Any = lambda provider, default: default):
+        self.plan, self.timeout, self.model_for = plan, timeout, model_for
+        self.index, self.moves = 0, []
+        self.endpoint = endpoint  # an explicit --endpoint applies to a single-step plan only
+        if endpoint and len(plan["steps"]) > 1:
+            fail("--endpoint needs --provider when the route chain is in use")
+
+    @property
+    def provider(self) -> str:
+        return self.plan["steps"][self.index][0]
+
+    def current_endpoint(self) -> str:
+        return self.endpoint or provider_endpoint(self.provider)
+
+    def endpoints(self) -> list[tuple[str, str]]:
+        return [(provider, self.endpoint or provider_endpoint(provider)) for provider, _ in self.plan["steps"]]
+
+    def model(self, default: str) -> str:
+        provider, pinned = self.plan["steps"][self.index]
+        return self.model_for(provider, pinned or default)
+
+    def send(self, payload: dict[str, Any]) -> dict[str, Any]:
+        while True:
+            request = {**payload, "model": self.model(payload["model"])}
+            try:
+                return call_jev(request, self.current_endpoint(), self.timeout, self.provider)
+            except Exhausted as exc:
+                if self.index + 1 >= len(self.plan["steps"]):
+                    raise
+                moved_from = self.provider
+                self.index += 1
+                self.moves.append({"from": moved_from, "to": self.provider, "reason": "exhausted"})
+                print(f"classifier-skill: {PROVIDERS[moved_from]['name']} credit or plan is used up; moving to "
+                      f"{PROVIDERS[self.provider]['name']}: {exc.message}", file=sys.stderr)
+
+    def log_fields(self) -> dict[str, Any]:
+        return {"host": self.plan["host"], "host_reason": self.plan["host_reason"], "route": self.plan["route"],
+                "provider_final": self.provider, "credential": "api_key" if PROVIDERS[self.provider].get("key")
+                and os.environ.get(PROVIDERS[self.provider]["key"], "").strip() else "none",
+                **({"moves": self.moves} if self.moves else {})}
+
+
 def redact(value: Any) -> tuple[Any, int]:
     """Scrub secrets from every string in state; returns the scrubbed copy and how many values were replaced."""
     if isinstance(value, str):
@@ -211,6 +324,15 @@ def check_size(payload: dict[str, Any], where: str = "request") -> None:
 
 def check_provider_limits(payload: dict[str, Any], provider: str, where: str = "request") -> None:
     """Refuse requests that exceed a provider's documented limits before any data is sent."""
+    if provider == "openai":
+        for question_id, question in payload["questions"].items():
+            criteria = question.get("criteria")
+            descriptions = (criteria.values() if isinstance(criteria, dict) else criteria) or []
+            if not isinstance(question["instructions"], str) or not all(
+                    d is None or isinstance(d, str) for d in descriptions):
+                fail(f"{where} question {question_id!r} has structured instructions or descriptions; OpenAI "
+                     "Decisions takes only text, so rewrite them as strings")
+        return
     if provider != "ollama":
         return
     questions = payload["questions"]
@@ -314,8 +436,74 @@ def is_local(endpoint: str) -> bool:
     return urlparse(endpoint).hostname in LOOPBACK_HOSTS
 
 
+NOUL_DESCRIPTIONS = "\n\nTrue means: {true}\nFalse means: {false}"  # OpenAI predicates have no description fields
+
+
+def to_openai_request(payload: dict[str, Any]) -> dict[str, Any]:
+    """System One request -> OpenAI Decisions request. Question ids become names; check_provider_limits has already
+    refused anything that cannot be said in text."""
+    questions = []
+    for question_id, question in payload["questions"].items():
+        kind, criteria = question["type"], question.get("criteria")
+        out = {"name": question_id, "instructions": question["instructions"]}
+        if kind == "noul":
+            out["type"] = "predicate"
+            if criteria:
+                out["instructions"] += NOUL_DESCRIPTIONS.format(**criteria)
+        elif kind == "choice":
+            out["type"], out["choices"] = "choice", [{"value": value, "description": description or value}
+                                                     for value, description in criteria.items()]
+        else:
+            out["type"], out["levels"] = "score", [{"label": level, "description": level} for level in criteria]
+        questions.append(out)
+    state = payload["state"]
+    return {"model": payload["model"], "questions": questions,
+            "input": state if isinstance(state, str) else json.dumps(state, ensure_ascii=False)}
+
+
+def from_openai_response(raw: Any, requested_model: str, questions: dict[str, Any]) -> Any:
+    """OpenAI Decisions response -> System One response. Anything malformed is passed on in a shape answer_errors
+    rejects, never repaired: a score level whose label is not the level asked at that index, or an option or level
+    listed twice. A refusal becomes {"type": "refusal"}, which review_flags sends to a person."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("answers"), list):
+        return raw
+    answers: dict[str, Any] = {}
+    try:
+        for item in raw["answers"]:
+            name, kind = item["name"], item["type"]
+            if name in answers:
+                return {**raw, "answers": None}  # two answers to one question: unsafe to act on
+            if kind == "refusal":
+                answers[name] = {"type": "refusal"}
+            elif kind == "predicate":
+                answers[name] = {"type": "noul", "noul": item.get("probability")}
+            elif kind == "choice":
+                pairs = [(p["value"], p["probability"]) for p in item["probabilities"]]
+                if len({value for value, _ in pairs}) != len(pairs):
+                    return {**raw, "answers": None}
+                answers[name] = {"type": "choice", "choice": item.get("choice"), "confidence": item.get("confidence"),
+                                 "probabilities": dict(pairs)}
+            elif kind == "score":
+                levels = (questions.get(name) or {}).get("criteria") or []
+                pairs = [(p["value"], p["probability"]) for p in item["probabilities"]]
+                if len({value for value, _ in pairs}) != len(pairs) or any(
+                        type(p["value"]) is not int or not 0 <= p["value"] < len(levels)
+                        or p.get("label") != levels[p["value"]] for p in item["probabilities"]):
+                    return {**raw, "answers": None}
+                answers[name] = {"type": "score", "score": item.get("score"), "confidence": item.get("confidence"),
+                                 "probabilities": {str(value): probability for value, probability in pairs}}
+            else:
+                answers[name] = {"type": kind}
+    except (KeyError, TypeError, AttributeError):
+        return {**raw, "answers": None}
+    model = raw.get("model") if isinstance(raw.get("model"), str) else requested_model
+    return {"id": raw.get("id"), "model": model, "usage": raw.get("usage"), "answers": answers}
+
+
 def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: str = "openrouter") -> dict[str, Any]:
     spec = PROVIDERS[provider]
+    openai_shape = spec.get("shape") == "openai"
+    body = to_openai_request(payload) if openai_shape else payload
     check_endpoint(provider, endpoint)
     key_env = spec.get("key")
     api_key = os.environ.get(key_env, "").strip() if key_env else ""
@@ -328,7 +516,7 @@ def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: s
 
     request = urllib.request.Request(
         endpoint,
-        data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+        data=json.dumps(body, separators=(",", ":")).encode("utf-8"),
         headers=headers,
         method="POST",
     )
@@ -337,14 +525,19 @@ def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: s
         try:
             opener = LOCAL_OPENER.open if is_local(endpoint) else urllib.request.urlopen
             with opener(request, timeout=timeout) as response:
-                return json.load(response)
+                result = json.load(response)
+                return from_openai_response(result, payload["model"], payload["questions"]) if openai_shape else result
         except urllib.error.HTTPError as exc:
             asked = retry_after(exc)
+            reply = exc.read().decode("utf-8", errors="replace") if exc.code in {402, 429} else None
+            if reply is not None and is_exhausted(exc.code, reply):
+                exc.close()
+                raise Exhausted(f"{service} returned HTTP {exc.code}: {reply}") from exc
             if retry and exc.code in RETRY_STATUSES and (asked is None or asked <= MAX_RETRY_AFTER):
                 exc.close()
                 time.sleep(RETRY_DELAYS[attempt] if asked is None else asked)
                 continue
-            body = exc.read().decode("utf-8", errors="replace")
+            body = reply if reply is not None else exc.read().decode("utf-8", errors="replace")
             exc.close()
             wait = f" (asked to retry after {asked:.0f}s, longer than the {MAX_RETRY_AFTER:.0f}s this script waits)" \
                 if asked is not None and asked > MAX_RETRY_AFTER and exc.code in RETRY_STATUSES else ""
@@ -398,6 +591,8 @@ def answer_errors(answers: Any, questions: dict[str, Any]) -> list[str]:
               for question_id in sorted(set(answers) - set(questions))]
     for question_id, question in questions.items():
         answer, kind = answers.get(question_id), question["type"]
+        if isinstance(answer, dict) and answer == {"type": "refusal"}:
+            continue  # a provider declined; review_flags sends it to a person
         if not isinstance(answer, dict) or answer.get("type") != kind:
             errors.append(f"{question_id}: missing or wrong-type answer")
         elif kind == "choice":
@@ -438,22 +633,34 @@ def response_cost(response: dict[str, Any]) -> float:
         return 0.0
 
 
-def review_flags(answers: dict[str, Any], margin: float) -> dict[str, list[str]]:
-    """Deterministic reasons to route an answer to a human; see the module docstring."""
+def model_family(model: Any) -> str:
+    text = str(model or "").lower()
+    return "luna" if "luna" in text else "jev" if "jev" in text else "other"
+
+
+def review_flags(answers: dict[str, Any], margin: float, model: Any = None) -> dict[str, list[str]]:
+    """Deterministic reasons to route an answer to a human; see the module docstring. A model family that has not
+    been calibrated (UNCALIBRATED_FAMILIES) gets a wider margin, a wider noul band, and a higher score bar."""
+    strict = model_family(model) in UNCALIBRATED_FAMILIES
+    margin, noul_band, score_bar = (margin + 0.1, 0.3, 0.6) if strict else (margin, 0.35, 0.5)
     flags: dict[str, list[str]] = {}
     for question_id, answer in (answers or {}).items():
         reasons = []
         kind = answer.get("type")
-        if kind == "choice":
+        if kind == "refusal":
+            reasons.append("the model declined to answer")
+        elif kind == "choice":
             if answer.get("choice") in FALLBACK_OPTIONS:
                 reasons.append(f"fallback option {answer['choice']!r} chosen")
             ranked = sorted((answer.get("probabilities") or {}).values(), reverse=True)
             if len(ranked) > 1 and ranked[0] - ranked[1] < margin:
                 reasons.append(f"runner-up within {ranked[0] - ranked[1]:.2f}")
-        elif kind == "noul" and isinstance(answer.get("noul"), (int, float)) and 0.35 < answer["noul"] < 0.65:
+        elif kind == "noul" and isinstance(answer.get("noul"), (int, float)) \
+                and noul_band < answer["noul"] < 1 - noul_band:
             reasons.append(f"noul {answer['noul']:.2f} is near 0.5")
-        elif kind == "score" and isinstance(answer.get("confidence"), (int, float)) and answer["confidence"] < 0.5:
-            reasons.append(f"score confidence {answer['confidence']:.2f} below 0.5")
+        elif kind == "score" and isinstance(answer.get("confidence"), (int, float)) \
+                and answer["confidence"] < score_bar:
+            reasons.append(f"score confidence {answer['confidence']:.2f} below {score_bar}")
         if reasons:
             flags[question_id] = reasons
     return flags
@@ -522,9 +729,11 @@ def log_call(args: argparse.Namespace, note: dict[str, str], template: dict[str,
         return
     questions = template["questions"]
     shape = {k: v for k, v in template.items() if k != "state"}
+    route = getattr(args, "route_log", None)
+    route = route if isinstance(route, dict) else {}
     record = {
         "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-        "provider": args.provider, **note, "reshape_noted": bool(note),
+        "provider": args.provider, **route, **note, "reshape_noted": bool(note),
         "questions": {qid: q["type"] for qid, q in questions.items()},
         "options": {qid: len(q["criteria"]) for qid, q in questions.items() if q["type"] != "noul"},
         "request_sha256": hashlib.sha256(json.dumps(shape, sort_keys=True).encode()).hexdigest()[:16],
@@ -540,7 +749,9 @@ def log_call(args: argparse.Namespace, note: dict[str, str], template: dict[str,
 
 
 def failure_kind(exc: CallError) -> str:
-    """A short, content-free label for the call log: the HTTP status, or "transport"."""
+    """A short, content-free label for the call log: "exhausted", the HTTP status, or "transport"."""
+    if isinstance(exc, Exhausted):
+        return "exhausted"
     status = getattr(exc.__cause__, "code", None)
     return f"http_{status}" if isinstance(status, int) else "transport"
 
@@ -574,7 +785,8 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
             redacted += n
         item_payload = {**template, "state": state}
         check_size(item_payload, f"batch line {number}")
-        check_provider_limits(item_payload, args.provider, f"batch line {number}")
+        for provider, _ in args.router.plan["steps"]:
+            check_provider_limits(item_payload, provider, f"batch line {number}")
         states.append((number, state))
     if not states:
         fail("batch file has no states")
@@ -592,7 +804,7 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
             record: dict[str, Any] = {"line": number, "payload": payload}
         else:
             try:
-                response = call_jev(payload, args.endpoint, args.timeout, args.provider)
+                response = args.router.send(payload)
             except CallError as exc:
                 stopped = (number, exc.message, failure_kind(exc))
                 break
@@ -605,7 +817,7 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
                 total_cost += response_cost(response)
                 tokens += usage_tokens(response)
                 models.add(response.get("model"))
-                review = review_flags(response.get("answers"), args.margin)
+                review = review_flags(response.get("answers"), args.margin, response.get("model"))
                 flagged += bool(review)
                 for question_id in review:
                     flags_by_question[question_id] = flags_by_question.get(question_id, 0) + 1
@@ -616,6 +828,7 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
         print(json.dumps(record, ensure_ascii=False, sort_keys=True), flush=True)
         done += 1
     if not args.dry_run:
+        args.provider, args.route_log = args.router.provider, args.router.log_fields()
         cost = f"cost ${total_cost:.6f}" if total_cost else "cost not reported by provider"
         print(f"classifier-skill: {len(states)} states, {done - invalid} answered, {flagged} flagged for review, "
               f"{invalid} invalid, {cost}", file=sys.stderr)
@@ -641,8 +854,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request-file", default="-", help="JSON request file, or - for stdin")
     parser.add_argument("--provider", choices=sorted(PROVIDERS),
-                        help="openrouter, typesafe, ollama, or compatible (default: CLASSIFIER_PROVIDER, else "
-                             "whichever Jev API key is set; local providers are never chosen automatically)")
+                        help="openrouter, typesafe, openai, ollama, or compatible (default: CLASSIFIER_PROVIDER; "
+                             "inside Codex or with CLASSIFIER_ROUTE, the OpenAI route chain; else whichever Jev API "
+                             "key is set; local providers are never chosen automatically)")
     parser.add_argument("--model", help="override the model (default: the provider's pinned Jev version, or "
                                         "nimble:9b for Ollama, or CLASSIFIER_COMPATIBLE_MODEL for compatible)")
     parser.add_argument("--local-only", action="store_true",
@@ -667,14 +881,18 @@ def main() -> None:
 
     if args.threshold is not None and not 0.5 <= args.threshold <= 1:
         fail("--threshold must be between 0.5 and 1")
-    args.provider = select_provider(args.provider)
+    plan = plan_route(args.provider, args.model, args.dry_run)
+    args.router = Router(plan, args.endpoint, args.timeout)
+    args.provider = args.router.provider
+    args.route_log = args.router.log_fields()
     spec = PROVIDERS[args.provider]
-    args.endpoint = args.endpoint or provider_endpoint(args.provider)
+    args.endpoint = args.router.current_endpoint()
     if spec.get("loopback_only"):
         check_endpoint(args.provider, args.endpoint)
-    if args.local_only and not is_local(args.endpoint):
-        fail(f"--local-only: refusing to send to {args.endpoint!r}, which is not on this machine", code=1)
-    default_model = spec.get("model") or os.environ.get(spec.get("model_env", ""), "").strip()
+    for _, endpoint in args.router.endpoints():
+        if args.local_only and not is_local(endpoint):
+            fail(f"--local-only: refusing to send to {endpoint!r}, which is not on this machine", code=1)
+    default_model = plan["steps"][0][1] or spec.get("model") or os.environ.get(spec.get("model_env", ""), "").strip()
     payload = normalize_request(load_request(args.request_file), args.model, batch=bool(args.batch),
                                 default_model=default_model)
     note = take_reshape(payload)
@@ -686,8 +904,10 @@ def main() -> None:
                 print(f"classifier-skill: redacted {redacted} secret value(s) from state before sending",
                       file=sys.stderr)
         check_size(payload)
-    check_provider_limits(payload, args.provider)
-    extras = sorted(set(payload) - spec.get("fields", ALLOWED_FIELDS))
+    for provider, _ in plan["steps"]:
+        check_provider_limits(payload, provider)
+    accepted = set.intersection(*(set(PROVIDERS[p].get("fields", ALLOWED_FIELDS)) for p, _ in plan["steps"]))
+    extras = sorted(set(payload) - accepted)
     if extras:
         fail(f"{', '.join(extras)} {'is' if len(extras) == 1 else 'are'} OpenRouter-only; "
              f"remove {'it' if len(extras) == 1 else 'them'} for provider {args.provider}")
@@ -699,14 +919,16 @@ def main() -> None:
     else:
         started = time.monotonic()
         try:
-            result = call_jev(payload, args.endpoint, args.timeout, args.provider)
+            result = args.router.send(payload)
         except CallError as exc:
+            args.provider, args.route_log = args.router.provider, args.router.log_fields()
             log_call(args, note, payload, {  # a failed call is logged too, so the report shows failure rates
                 "mode": "single", "items": 1, "flagged": 0, "invalid": 0, "redacted": redacted,
                 "failed": failure_kind(exc), "seconds": round(time.monotonic() - started, 2)})
             fail(exc.message, code=1)
+        args.provider, args.route_log = args.router.provider, args.router.log_fields()
         errors = response_errors(result, payload["questions"])
-        review = {} if errors else review_flags(result.get("answers"), args.margin)
+        review = {} if errors else review_flags(result.get("answers"), args.margin, result.get("model"))
         log_call(args, note, payload, {
             "mode": "single", "items": 1, "flagged": int(bool(review)), "invalid": int(bool(errors)),
             "redacted": redacted,
