@@ -4,7 +4,9 @@ Date: 2026-10-08. Status: partly built (contract 1.8, uncommitted).
 
 Built 2026-10-08: `openai` provider with translation both ways and the refusal state (Phase 1 steps 1, 2, 5, 6); host detection and the route chain `apikey` then `openrouter` (Luna), moving only on exhausted credit, with `CLASSIFIER_ROUTE` and `CLASSIFIER_HOST` (Phase 2, without the ChatGPT step); stricter review for uncalibrated Luna (Phase 4 step 1, as a family rule, not a table); call-log and summary fields; tests; docs. Live check: Codex route with only an OpenRouter key answered through Luna on OpenRouter.
 
-Not built: Phase 0 (all evidence steps), ChatGPT sign-in (3A), auth command (3B), OpenAI limit caps and rate-limit header mapping (Phase 1 step 4; needs Phase 0), dated snapshot pin, Luna calibration, caller cache keys (name-generator is a sibling skill), Phase 6 steps 2-3 (model-worker, global instruction files).
+Not built: Phase 0 (all evidence steps), ChatGPT sign-in (3A), auth command (3B), OpenAI limit caps and rate-limit header mapping (Phase 1 step 4; needs Phase 0), dated snapshot pin, Luna calibration, caller cache keys (name-generator is a sibling skill).
+
+Built 2026-10-08 (outside the repo): `~/.codex/bin/model-worker jev` now runs `jev_decide.py` (backup `model-worker.bak-20261008`), passing `OPENROUTER_API_KEY` / `OPENAI_API_KEY` from Keychain items `openrouter-api-key` / `openai-api-key` into the child only. This is how Codex already got its OpenRouter key (Phase 0 step 1 partly answered) and is the working key-delivery path for 3B. Live: Jev from Claude, Luna on OpenRouter with `CODEX_THREAD_ID` set. `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` updated together. No `openai-api-key` Keychain item exists yet.
 
 ## Goal
 
