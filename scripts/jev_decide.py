@@ -464,7 +464,8 @@ def to_openai_request(payload: dict[str, Any]) -> dict[str, Any]:
 def from_openai_response(raw: Any, requested_model: str, questions: dict[str, Any]) -> Any:
     """OpenAI Decisions response -> System One response. Anything malformed is passed on in a shape answer_errors
     rejects, never repaired: a score level whose label is not the level asked at that index, or an option or level
-    listed twice. A refusal becomes {"type": "refusal"}, which review_flags sends to a person."""
+    listed twice. A refusal becomes {"type": "refusal"}, which review_flags sends to a person.
+    requested_model is retained for caller compatibility, never substituted for missing response identity."""
     if not isinstance(raw, dict) or not isinstance(raw.get("answers"), list):
         return raw
     answers: dict[str, Any] = {}
@@ -496,7 +497,7 @@ def from_openai_response(raw: Any, requested_model: str, questions: dict[str, An
                 answers[name] = {"type": kind}
     except (KeyError, TypeError, AttributeError):
         return {**raw, "answers": None}
-    model = raw.get("model") if isinstance(raw.get("model"), str) else requested_model
+    model = raw.get("model")
     return {"id": raw.get("id"), "model": model, "usage": raw.get("usage"), "answers": answers}
 
 
@@ -620,16 +621,22 @@ def response_errors(response: Any, questions: dict[str, Any]) -> list[str]:
         return ["response is not a JSON object"]
     if not isinstance(response.get("usage"), (dict, type(None))):
         return ["response usage is not an object"]
-    if not isinstance(response.get("model"), (str, type(None))):
+    if not isinstance(response.get("model"), str):
         return ["response model is not a string"]
+    if not response["model"].strip():
+        return ["response model is empty"]
     return answer_errors(response.get("answers"), questions)
 
 
-def response_cost(response: dict[str, Any]) -> float:
+def response_cost(response: Any) -> float:
     """The reported cost in dollars; 0 when absent or unreadable (an odd cost is not a reason to drop an answer)."""
+    usage = response.get("usage") if isinstance(response, dict) else None
+    if not isinstance(usage, dict):
+        return 0.0
     try:
-        return float((response.get("usage") or {}).get("cost") or 0)
-    except (TypeError, ValueError):
+        cost = float(usage.get("cost") or 0)
+        return cost if math.isfinite(cost) and cost >= 0 else 0.0
+    except (TypeError, ValueError, OverflowError):
         return 0.0
 
 
@@ -756,11 +763,13 @@ def failure_kind(exc: CallError) -> str:
     return f"http_{status}" if isinstance(status, int) else "transport"
 
 
-def usage_tokens(response: dict[str, Any]) -> int:
-    usage = response.get("usage") or {}
+def usage_tokens(response: Any) -> int:
+    usage = response.get("usage") if isinstance(response, dict) else None
+    if not isinstance(usage, dict):
+        return 0
     try:
-        return int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
-    except (TypeError, ValueError):
+        return max(0, int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0))
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
@@ -808,14 +817,14 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
             except CallError as exc:
                 stopped = (number, exc.message, failure_kind(exc))
                 break
+            total_cost += response_cost(response)
+            tokens += usage_tokens(response)
             errors = response_errors(response, template["questions"])
             if errors:
                 invalid += 1
                 record = {"line": number, "state": state, "invalid": errors,
                           "model": response.get("model") if isinstance(response, dict) else None}
             else:
-                total_cost += response_cost(response)
-                tokens += usage_tokens(response)
                 models.add(response.get("model"))
                 review = review_flags(response.get("answers"), args.margin, response.get("model"))
                 flagged += bool(review)
@@ -932,7 +941,7 @@ def main() -> None:
         log_call(args, note, payload, {
             "mode": "single", "items": 1, "flagged": int(bool(review)), "invalid": int(bool(errors)),
             "redacted": redacted,
-            "input_tokens": 0 if errors else usage_tokens(result), "cost": None if errors else response_cost(result) or None,
+            "input_tokens": usage_tokens(result), "cost": response_cost(result) or None,
             "model": [result.get("model")] if isinstance(result, dict) else [], "seconds": round(time.monotonic() - started, 2)})
         if errors:
             json.dump({"invalid": errors, "response": result}, sys.stdout, ensure_ascii=False, indent=2)

@@ -43,7 +43,7 @@ None found: skip your classifier step and say so.
 **Single call (exit 0):** one JSON object on stdout with:
 - `answers`: one entry per question id. `choice` has `choice`, `probabilities` (option → probability), and `confidence`; `noul` has `noul` (P(true), 0–1); a provider that declines gives `{"type": "refusal"}`, always named in `review`; `score` has `score` (a number from 0 to levels−1), `confidence`, and `probabilities` (level index as a string → probability).
 - `review`: question id → list of reasons to distrust that answer. Treat any answer named here as unanswered. Empty means no flags.
-- `model` and `usage` as the provider reports them (`usage.cost` may be absent).
+- `model` and `usage` as the provider reports them (`usage.cost` may be absent). A missing, blank, or non-string response model is invalid; the requested model is not substituted as evidence of which model answered. Valid reported usage is counted even when the answer fails validation.
 - `decisions`, only with `--threshold`.
 
 **Single call (exit 3):** stdout is `{"invalid": [reasons], "response": {...}}`.

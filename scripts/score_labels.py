@@ -46,6 +46,9 @@ def picks(lines: list[dict[str, Any]], question: str) -> dict[str, tuple[str | N
     out = {}
     for line in lines:
         item_id = str(line["id"])
+        if item_id in out:
+            print(f"score_labels: duplicate prediction id {item_id!r}", file=sys.stderr)
+            raise SystemExit(2)
         if isinstance(line.get("answers"), dict) and question in line["answers"]:
             answer = line["answers"][question]
             if answer.get("type") == "noul":
@@ -118,8 +121,14 @@ def main() -> None:
     if args.target is not None and not 0 < args.target <= 1:
         parser.error("--target must be an accuracy between 0 and 1")
 
-    labels = {str(row[args.id_field]): canonical(row[args.label_field]) for row in read_jsonl(args.labels)
-              if row.get(args.label_field) not in (None, "")}
+    labels = {}
+    for row in read_jsonl(args.labels):
+        if row.get(args.label_field) in (None, ""):
+            continue
+        item_id = str(row[args.id_field])
+        if item_id in labels:
+            parser.error(f"duplicate label id {item_id!r}")
+        labels[item_id] = canonical(row[args.label_field])
     got = picks(read_jsonl(args.answers), args.question)
     ids = sorted(labels)  # every labeled item counts; one with no answer line is unanswered
     missing = sorted(set(labels) - set(got))

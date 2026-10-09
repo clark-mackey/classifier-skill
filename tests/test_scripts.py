@@ -1915,3 +1915,96 @@ class OpenAIRoute(unittest.TestCase):
         self.assertEqual([l["versions"]["model"] for l in lines], ["gpt-6-luna-2026-10-01", luna, luna])
         self.assertEqual(summary["route_moves"], [{"from": "openai", "to": "openrouter", "reason": "exhausted"}])
         self.assertTrue(summary["complete"])
+
+
+class SeniorReviewRegressions(unittest.TestCase):
+    def test_hosted_redirect_is_rejected_by_actual_send_path(self):
+        module = load_module()
+        requests = []
+
+        class RedirectResponse(module.urllib.request.HTTPSHandler):
+            handler_order = 100
+
+            def https_open(self, req):
+                requests.append(req.full_url)
+                response = module.urllib.response.addinfourl(
+                    io.BytesIO(b""), {"Location": "https://other.invalid/collect"}, req.full_url, 302)
+                response.msg = "Found"
+                return response
+
+        module.urllib.request._opener.add_handler(RedirectResponse())
+        payload = {"model": "test", "state": "x", "questions": ResponseGate.QUESTION}
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-not-a-key"}):
+            with self.assertRaises(module.CallError):
+                module.call_jev(payload, module.PROVIDERS['openai']['endpoint'], 1, 'openai')
+        self.assertEqual(requests, [module.PROVIDERS['openai']['endpoint']])
+
+    def test_missing_model_is_invalid_including_openai_translation(self):
+        module = load_module()
+        for model in (None, "", "  "):
+            response = {"model": model, "answers": {"q": {"type": "noul", "noul": .68}}}
+            self.assertTrue(module.response_errors(response, ResponseGate.QUESTION))
+        translated = module.from_openai_response(
+            {"answers": [{"name": "q", "type": "predicate", "probability": .68}]},
+            "gpt-6-luna", ResponseGate.QUESTION)
+        self.assertTrue(module.response_errors(translated, ResponseGate.QUESTION))
+
+    def test_invalid_batch_answer_still_counts_usage(self):
+        module = load_module()
+        replies = [{"model": "test", "usage": {"cost": 1, "input_tokens": 20}, "answers": {}},
+                   {**ResponseGate.GOOD, "usage": {"cost": .1, "input_tokens": 2}}]
+        with tempfile.TemporaryDirectory() as tmp:
+            items = Path(tmp) / 'items.jsonl'
+            items.write_text('"a"\n"b"\n')
+            argv = ['jev_decide.py', '--provider', 'openrouter', '--batch', str(items)]
+            with mock.patch.object(sys, 'argv', argv), \
+                    mock.patch.object(sys, 'stdin', io.StringIO(json.dumps({'questions': ResponseGate.QUESTION}))), \
+                    mock.patch.object(sys, 'stdout', io.StringIO()), \
+                    mock.patch.object(sys, 'stderr', io.StringIO()), \
+                    mock.patch.object(module.Router, 'send', side_effect=replies), \
+                    mock.patch.object(module, 'log_call') as logged:
+                with self.assertRaises(SystemExit) as caught:
+                    module.main()
+                self.assertEqual(caught.exception.code, 3)
+                self.assertAlmostEqual(logged.call_args.args[3]['cost'], 1.1)
+                self.assertEqual(logged.call_args.args[3]['input_tokens'], 22)
+
+    def test_invalid_single_answer_still_counts_usage(self):
+        module = load_module()
+        reply = {'model': 'test', 'answers': {}, 'usage': {'cost': .5, 'input_tokens': 12}}
+        with mock.patch.object(sys, 'argv', ['jev_decide.py', '--provider', 'openrouter']), \
+                mock.patch.object(sys, 'stdin', io.StringIO(json.dumps({'state': 'x', 'questions': ResponseGate.QUESTION}))), \
+                mock.patch.object(sys, 'stdout', io.StringIO()), \
+                mock.patch.object(sys, 'stderr', io.StringIO()), \
+                mock.patch.object(module.Router, 'send', return_value=reply), \
+                mock.patch.object(module, 'log_call') as logged:
+            with self.assertRaises(SystemExit):
+                module.main()
+            self.assertEqual(logged.call_args.args[3]['cost'], .5)
+            self.assertEqual(logged.call_args.args[3]['input_tokens'], 12)
+
+    def test_invalid_sheet_answer_still_counts_usage(self):
+        engine = ItemsEngine()
+        reply = engine.answer()
+        bad = {**reply, 'answers': {}, 'usage': {'cost': 1, 'input_tokens': 20}}
+        _, lines, summary, _, _ = engine.judge(engine.ITEMS, [bad] + [reply] * 3)
+        self.assertEqual(lines[0]['reason'], 'invalid_answer')
+        self.assertAlmostEqual(summary['cost'], 1.00003)
+
+    def test_duplicate_prediction_and_label_ids_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            labels, answers = Path(tmp) / 'labels.jsonl', Path(tmp) / 'answers.jsonl'
+            for duplicate in ('labels', 'answers'):
+                labels.write_text('{"id":"a","label":"true"}\n' * (2 if duplicate == 'labels' else 1))
+                answers.write_text('{"id":"a","answer":"true"}\n' * (2 if duplicate == 'answers' else 1))
+                result = run('score_labels.py', '--labels', str(labels), '--answers', str(answers), '--question', 'q')
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('duplicate', result.stderr)
+                self.assertEqual(result.stdout, '')
+
+    def test_malformed_usage_is_safe_to_account_before_answer_validation(self):
+        module = load_module()
+        for response in (None, [], {'usage': 'bad'}, {'usage': {'cost': 'NaN'}},
+                         {'usage': {'cost': -1}}, {'usage': {'cost': 'Infinity', 'input_tokens': float('inf')}}):
+            self.assertEqual(module.response_cost(response), 0)
+            self.assertEqual(module.usage_tokens(response), 0)

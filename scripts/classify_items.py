@@ -333,12 +333,12 @@ def main() -> None:
                 if reason not in ITEM_SCOPED:  # auth, bad request, transport: the rest would fail the same way
                     stopped = "not_sent"
                 continue
+            cost += jev.response_cost(response)
+            tokens += jev.usage_tokens(response)
             if jev.response_errors(response, questions):
                 unanswered(item_id, "invalid_answer")
                 continue
             answers = response["answers"]
-            cost += jev.response_cost(response)
-            tokens += jev.usage_tokens(response)
             if isinstance(response.get("model"), str):
                 models.add(response["model"])
             review = jev.review_flags(answers, float(sheet.get("margin", 0.2)), response.get("model"))
