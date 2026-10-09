@@ -2449,6 +2449,18 @@ class Probe(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["endpoint"], server.url)
         self.assertNotIn("sekrit", result.stdout + result.stderr)
 
+    def test_endpoint_refusals_hide_the_query_and_survive_a_bad_port(self):
+        off_host = run("jev_decide.py", "--probe", "openrouter/jev-1.13", "--endpoint",
+                       "https://evil.example.com/x?key=sekrit", env={"OPENROUTER_API_KEY": "test-not-a-key"})
+        self.assertEqual(off_host.returncode, 1)
+        self.assertIn("refusing to send credentials to 'https://evil.example.com/x'", off_host.stderr)
+        self.assertNotIn("sekrit", off_host.stderr)
+        bad_port = run("jev_decide.py", "--probe", "openrouter/jev-1.13", "--endpoint",
+                       "https://openrouter.ai:abc/x", env={"OPENROUTER_API_KEY": "test-not-a-key"})
+        self.assertEqual(bad_port.returncode, 1)
+        self.assertIn("port is not a number", bad_port.stderr)
+        self.assertNotIn("Traceback", bad_port.stderr)
+
     def test_local_only_refuses_a_remote_probe(self):
         result = run("jev_decide.py", "--probe", "openrouter/jev-1.13", "--local-only",
                      env={"OPENROUTER_API_KEY": "test-not-a-key"})

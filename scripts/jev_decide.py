@@ -666,15 +666,21 @@ def check_endpoint(provider: str, endpoint: str) -> None:
     """Refuse any endpoint off the provider's host. Plain http is allowed only for a server on this machine."""
     spec = PROVIDERS[provider]
     parsed = urlparse(endpoint)
+    try:
+        parsed.port
+    except ValueError:
+        fail(f"refusing endpoint {safe_endpoint(endpoint)!r}: its port is not a number", code=1)
     if spec.get("loopback_only"):
         if parsed.scheme not in {"http", "https"} or parsed.hostname not in LOOPBACK_HOSTS:
-            fail(f"refusing Ollama endpoint {endpoint!r}; provider ollama only allows localhost", code=1)
+            fail(f"refusing Ollama endpoint {safe_endpoint(endpoint)!r}; provider ollama only allows localhost",
+                 code=1)
         return
     host = spec.get("host") or urlparse(provider_endpoint(provider)).hostname
     local_http = parsed.scheme == "http" and parsed.hostname in LOOPBACK_HOSTS and "url_env" in spec
     if parsed.hostname != host or not (parsed.scheme == "https" or local_http):
         allowed = f"https://{host}" + (" (or http on localhost)" if "url_env" in spec else "")
-        fail(f"refusing to send credentials to {endpoint!r}; {provider} only allows {allowed}", code=1)
+        fail(f"refusing to send credentials to {safe_endpoint(endpoint)!r}; {provider} only allows {allowed}",
+             code=1)
 
 
 def fill_params(provider: str, endpoint: str) -> str:
@@ -1182,8 +1188,11 @@ def safe_endpoint(url: str) -> str:
     """The endpoint for a printed report: scheme, host, port, and path only, so a query-string key or user info
     never reaches stdout. (A filled path placeholder, such as an account id, is shown; it is not a credential.)"""
     parts = urlparse(url)
-    host = parts.hostname or ""
-    return f"{parts.scheme}://{host}{f':{parts.port}' if parts.port else ''}{parts.path}"
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    return f"{parts.scheme}://{parts.hostname or ''}{f':{port}' if port else ''}{parts.path}"
 
 
 def run_probe(args: argparse.Namespace) -> None:
