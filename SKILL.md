@@ -122,6 +122,17 @@ Hosted Jev is reached with `--provider openrouter` or `--provider typesafe`; wit
 
 Direct OpenAI Decisions calls use separately billed API access, not the ChatGPT subscription. ChatGPT-plan sign-in for `/v1/decisions` remains deferred until OpenAI documents support; see [references/providers.md](references/providers.md).
 
+### Add a model
+
+When the user names a decision model or provider the skill does not know yet, usually with a docs link:
+
+1. Read the docs and draft a `user/` profile with a source and date for each limit, in the format of `scripts/profiles.json`. See Profiles in [references/providers.md](references/providers.md).
+2. Save it to the file named by the user's `CLASSIFIER_PROFILES` environment variable (the probe reads `user/` ids only from there). Run `scripts/jev_decide.py --probe <id> --dry-run`, then `--probe <id>`.
+3. Show the user the draft and the probe report, and merge the fields of its suggested patch they accept into that model's entry (the patch lists only changed fields; it is empty when no call answered). Add `--options` only when their questions need more than 26 options.
+4. The user supplies the credential.
+
+A new profile is `uncalibrated` until a backtest says otherwise. Move it into the shipped `profiles.json` only when shipping it for everyone.
+
 ### Compare several decision models
 
 When the user asks to compare models, wants an independent second opinion, or needs to measure disagreement or calibration, read [references/parallel-comparison.md](references/parallel-comparison.md). This is an optional mode, not the default routing chain. Give every model the same item states, question ids, criteria, and ordering; run each with an explicit provider and model so a fallback cannot silently change its identity. If subagents are available and authorized, assign one provider to each and run them in parallel. The working agent keeps the original request, aligns results by item and question, and reviews disagreements. Do not average probabilities or treat agreement as proof of correctness.

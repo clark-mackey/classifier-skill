@@ -1082,7 +1082,7 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([l["id"] for l in lines], [i["term"] for i in self.ITEMS])
         self.assertTrue(all(l["versions"] == {"sheet": "test-terms@2", "recipe": None, "model": "typesafe/jev-1.13",
-                                              "contract": "1.10", "context": "02f189c76132"} for l in lines))
+                                              "contract": "1.11", "context": "02f189c76132"} for l in lines))
         self.assertEqual((summary["complete"], summary["items_in"], summary["items_out"], summary["answered"]),
                          (True, 4, 4, 4))
         self.assertIn("Classifier: 4/0/0 (none)", err)
@@ -1201,7 +1201,7 @@ class ItemsEngine(unittest.TestCase):
 
     def test_contract_version(self):
         result = run("classify_items.py", "--contract-version")
-        self.assertEqual(result.stdout.strip(), "1.10")
+        self.assertEqual(result.stdout.strip(), "1.11")
 
     def test_context_file_replaces_sheet_context(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2049,7 +2049,7 @@ class Profiles(unittest.TestCase):
         self.assertEqual(current, json.loads(provider_snapshot.FIXTURE.read_text()))
 
     def test_contract_version(self):
-        self.assertEqual(run("jev_decide.py", "--contract-version").stdout.strip(), "1.10")
+        self.assertEqual(run("jev_decide.py", "--contract-version").stdout.strip(), "1.11")
 
     def test_openrouter_url_override_stays_on_its_host(self):
         module = self.load()
@@ -2266,3 +2266,282 @@ class SheetPins(unittest.TestCase):
             result = run("classify_items.py", *args, "--provider", "ollama")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("no profile for ollama model 'tev1:4b'", result.stderr)
+
+
+class FakeDecisionServer:
+    """A System One server on 127.0.0.1 for --probe tests. `mode`: plain, wrapped, no_model, no_usage, drop_past_30,
+    refuse_past_30 (HTTP 400), exhausted_past_30 (HTTP 402), or redirect. Records the option count of every choice
+    question it receives."""
+
+    def __init__(self, mode="plain"):
+        import http.server
+        import threading
+        server_self = self
+        self.mode, self.received = mode, []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                answers = {}
+                for qid, question in body["questions"].items():
+                    if question["type"] == "choice":
+                        options = list(question["criteria"])
+                        server_self.received.append(len(options))
+                        status = {"refuse_past_30": 400, "exhausted_past_30": 402}.get(server_self.mode)
+                        if status and len(options) > 30:
+                            self.send_response(status)
+                            self.send_header("Content-Length", "0")
+                            self.end_headers()
+                            return
+                        if server_self.mode == "drop_past_30":
+                            options = options[:30]
+                        share = 1 / len(options)
+                        answers[qid] = {"type": "choice", "choice": options[0], "confidence": share,
+                                        "probabilities": {o: share for o in options}}
+                    else:
+                        answers[qid] = {"type": "noul", "noul": 0.9}
+                reply = {"model": "fake-1", "usage": {"input_tokens": 5, "cost": 0.0001}, "answers": answers}
+                if server_self.mode == "redirect":
+                    self.send_response(302)
+                    self.send_header("Location", "https://evil.example.com/x")
+                    self.end_headers()
+                    return
+                if server_self.mode == "no_model":
+                    reply.pop("model")
+                if server_self.mode == "no_usage":
+                    reply.pop("usage")
+                if server_self.mode == "wrapped":
+                    reply = {"result": reply, "success": True, "errors": []}
+                data = json.dumps(reply).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.httpd = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}/v1/systemone"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+class Probe(unittest.TestCase):
+    """--probe (contract 1.11): one tiny call through the normal send path, a report, and a suggested patch."""
+
+    def probe(self, mode, *argv, env=None):
+        server = FakeDecisionServer(mode)
+        try:
+            result = run("jev_decide.py", *argv, env={"CLASSIFIER_COMPATIBLE_URL": server.url,
+                                                      "CLASSIFIER_COMPATIBLE_MODEL": "fake-model", **(env or {})})
+        finally:
+            server.close()
+        report = json.loads(result.stdout) if result.stdout.strip().startswith("{") else None
+        return result, report, server.received
+
+    def assert_patch_touches_models_only(self, patch):
+        self.assertLessEqual(set(patch), {"models"})
+        for entry in patch.get("models", {}).values():
+            self.assertLessEqual(set(entry), {"provider", "model", "calibration", "reply_models", "limits"})
+
+    def test_plain_reply(self):
+        result, report, _ = self.probe("plain", "--probe", "compatible")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        call = report["calls"]["single"]
+        self.assertEqual((call["wrapper"], call["model"], call["model_known"]), ("none", "fake-1", False))
+        self.assertEqual((call["usage_fields"], call["cost_reported"]), (["cost", "input_tokens"], True))
+        self.assertEqual(report["cost"], 0.0001)
+        self.assertEqual(report["suggested_patch"], {"models": {"user/compatible-fake-model": {
+            "provider": "compatible", "model": "fake-model", "calibration": "uncalibrated",
+            "reply_models": ["fake-1"]}}})
+        self.assert_patch_touches_models_only(report["suggested_patch"])
+
+    def test_wrapped_reply_is_reported_not_accepted(self):
+        result, report, _ = self.probe("wrapped", "--probe", "compatible")
+        self.assertEqual(result.returncode, 1)
+        call = report["calls"]["single"]
+        self.assertEqual(call["wrapper"], "result")
+        self.assertFalse(call["ok"])
+        self.assertEqual(report["suggested_patch"], {})  # a model that never answered gets no profile
+
+    def test_missing_model_and_missing_usage(self):
+        result, report, _ = self.probe("no_model", "--probe", "compatible")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("response model is not a string", report["calls"]["single"]["errors"])
+        result, report, _ = self.probe("no_usage", "--probe", "compatible")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        call = report["calls"]["single"]
+        self.assertEqual((call["usage_fields"], call["cost_reported"], call["cost"]), (None, False, 0.0))
+
+    def test_redirect_is_refused(self):
+        result, report, _ = self.probe("redirect", "--probe", "compatible")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("HTTP 302", report["calls"]["single"]["error"])
+        self.assertEqual(report["suggested_patch"], {})
+
+    def test_option_probe_sends_past_the_profile_limit(self):
+        server_args = ("--probe", "ollama/nimble", "--options")
+        server = FakeDecisionServer("plain")
+        try:
+            result = run("jev_decide.py", *server_args, "--endpoint", server.url)
+        finally:
+            server.close()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(server.received, [26, 64, 128])  # nimble's profile allows 26; the probe still sends more
+        self.assertEqual(report["largest_options_ok"], 128)
+        entry = report["suggested_patch"]["models"]["ollama/nimble"]
+        self.assertEqual(entry["limits"]["options"], 128)
+        self.assertEqual(entry["limits"]["context_tokens"], 8192)  # other model limits kept
+        self.assert_patch_touches_models_only(report["suggested_patch"])
+
+    def test_option_probe_catches_dropped_options(self):
+        server = FakeDecisionServer("drop_past_30")
+        try:
+            result = run("jev_decide.py", "--probe", "ollama/nimble", "--options", "--endpoint", server.url)
+        finally:
+            server.close()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(server.received, [26, 64])
+        self.assertEqual(report["largest_options_ok"], 26)
+        self.assertFalse(report["calls"]["64"]["ok"])
+        limits = report["suggested_patch"]["models"]["ollama/nimble"]["limits"]
+        self.assertEqual(limits["options"], 26)  # same as the profile; the probe date is still recorded
+        self.assertRegex(limits["_options_probed"], r"^\d{4}-\d\d-\d\d with nimble:9b$")
+
+    def option_probe(self, mode):
+        server = FakeDecisionServer(mode)
+        try:
+            result = run("jev_decide.py", "--probe", "ollama/nimble", "--options", "--endpoint", server.url)
+        finally:
+            server.close()
+        return result, json.loads(result.stdout), server.received
+
+    def test_refused_size_is_a_cap(self):
+        result, report, received = self.option_probe("refuse_past_30")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((received, report["largest_options_ok"]), ([26, 64], 26))
+        self.assertNotIn("inconclusive", report["calls"]["64"])
+        self.assertEqual(report["suggested_patch"]["models"]["ollama/nimble"]["limits"]["options"], 26)
+
+    def test_failure_that_is_not_a_refusal_leaves_the_cap_unknown(self):
+        result, report, received = self.option_probe("exhausted_past_30")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(received, [26, 64])
+        self.assertTrue(report["calls"]["64"]["inconclusive"])
+        self.assertNotIn("limits", report["suggested_patch"].get("models", {}).get("ollama/nimble", {}))
+
+    def test_report_strips_the_query_from_the_endpoint(self):
+        server = FakeDecisionServer("plain")
+        try:
+            url = server.url + "?key=sekrit"
+            result = run("jev_decide.py", "--probe", "compatible", env={
+                "CLASSIFIER_COMPATIBLE_URL": url, "CLASSIFIER_COMPATIBLE_MODEL": "fake-model"})
+        finally:
+            server.close()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["endpoint"], server.url)
+        self.assertNotIn("sekrit", result.stdout + result.stderr)
+
+    def test_local_only_refuses_a_remote_probe(self):
+        result = run("jev_decide.py", "--probe", "openrouter/jev-1.13", "--local-only",
+                     env={"OPENROUTER_API_KEY": "test-not-a-key"})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("--local-only", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_user_profile_probe_appends_an_unknown_reply_id_and_logs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profiles, log = Path(tmp) / "profiles.json", Path(tmp) / "calls.jsonl"
+            profiles.write_text(json.dumps({"models": {"user/fake": {
+                "provider": "compatible", "model": "fake-model", "reply_models": ["fake-0"],
+                "calibration": "uncalibrated"}}}))
+            result, report, _ = self.probe("plain", "--probe", "user/fake", env={
+                "CLASSIFIER_PROFILES": str(profiles), "CLASSIFIER_SKILL_LOG": str(log)})
+            record = json.loads(log.read_text().splitlines()[-1])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report["profile"], "user/fake")
+        self.assertEqual(report["suggested_patch"], {"models": {"user/fake": {"reply_models": ["fake-0", "fake-1"]}}})
+        self.assertEqual((record["mode"], record["items"], record["invalid"]), ("probe", 1, 0))
+        self.assertEqual(record["profile"], "user/fake")
+
+    def test_openai_shape_probe_translates_request_and_reply(self):
+        module = load_module()
+        sent = []
+
+        class Response:
+            def __enter__(self):
+                return io.BytesIO(json.dumps({"model": "gpt-6-luna", "usage": {"input_tokens": 9}, "answers": [
+                    {"type": "predicate", "name": "probe", "probability": 0.9}]}).encode())
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(request, timeout):
+            sent.append((request.full_url, json.loads(request.data)))
+            return Response()
+
+        out = io.StringIO()
+        with mock.patch.object(module.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(sys, "argv", ["jev_decide.py", "--probe", "openai/gpt-6-luna"]), \
+                mock.patch.object(sys, "stdout", out), \
+                mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-not-a-key", "CLASSIFIER_SKILL_LOG": "off"}):
+            module.main()
+        report = json.loads(out.getvalue())
+        self.assertEqual(sent[0][0], "https://api.openai.com/v1/decisions")
+        self.assertEqual(sent[0][1]["questions"][0]["type"], "predicate")
+        call = report["calls"]["single"]
+        self.assertEqual((call["ok"], call["model"], call["model_known"]), (True, "gpt-6-luna", True))
+        self.assertEqual(report["suggested_patch"], {})
+
+    def test_family_profile_and_missing_model(self):
+        ok = run("jev_decide.py", "--probe", "ollama/nimble", "--model", "nimble:4b", "--dry-run")
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        self.assertEqual(json.loads(ok.stdout)["model"], "nimble:4b")
+        other = run("jev_decide.py", "--probe", "ollama/nimble", "--model", "tev1:4b", "--dry-run")
+        self.assertEqual(other.returncode, 2)
+        self.assertIn("pass --model", other.stderr)
+        bare = run("jev_decide.py", "--probe", "compatible", "--dry-run",
+                   env={"CLASSIFIER_COMPATIBLE_URL": "http://127.0.0.1:9/x", "CLASSIFIER_COMPATIBLE_MODEL": ""})
+        self.assertEqual(bare.returncode, 2)
+        self.assertIn("needs --model", bare.stderr)
+
+    def test_ordinary_calls_keep_the_profile_limit(self):
+        question = {"type": "choice", "instructions": "x?", "criteria": {f"o{i}": None for i in range(27)}}
+        result = run("jev_decide.py", "--dry-run", "--provider", "ollama",
+                     stdin=json.dumps({"state": "s", "questions": {"q": question}}))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("27 options", result.stderr)
+
+    def test_dry_run_sends_nothing_and_needs_no_key(self):
+        server = FakeDecisionServer("plain")
+        try:
+            result = run("jev_decide.py", "--probe", "ollama/nimble", "--options", "--dry-run",
+                         "--endpoint", server.url)
+            openai = run("jev_decide.py", "--probe", "openai/gpt-6-luna", "--dry-run")
+        finally:
+            server.close()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(server.received, [])
+        self.assertEqual(len(json.loads(result.stdout)["requests"]), 3)
+        self.assertEqual(openai.returncode, 0, openai.stderr)
+        self.assertEqual(json.loads(openai.stdout)["requests"][0]["questions"][0]["type"], "predicate")
+
+    def test_probe_checks_the_endpoint_like_a_real_call(self):
+        result = run("jev_decide.py", "--probe", "openrouter/jev-1.13", "--endpoint", "https://evil.example.com/x",
+                     env={"OPENROUTER_API_KEY": "test-not-a-key"})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("refusing to send credentials", result.stderr)
+
+    def test_bad_arguments(self):
+        self.assertEqual(run("jev_decide.py", "--options").returncode, 2)
+        self.assertEqual(run("jev_decide.py", "--probe", "nope").returncode, 2)
+        self.assertEqual(run("jev_decide.py", "--probe", "openai/gpt-6-luna", "--model", "other").returncode, 2)
+        self.assertEqual(run("jev_decide.py", "--probe", "openrouter/jev-1.13", "--provider", "typesafe",
+                             "--dry-run").returncode, 2)

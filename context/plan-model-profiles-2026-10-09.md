@@ -1,6 +1,6 @@
 # Plan: model profiles, then Cloudflare Clef
 
-Date: 2026-10-09. Status: Phase 1 built (contract 1.10, uncommitted); Phases 2–4 planned. Revised after code-owl plan reviews rounds 1–3 (2026-10-09).
+Date: 2026-10-09. Status: Phase 1 shipped (contract 1.10, 6d04f5d); Phase 2 built (contract 1.11, uncommitted); Phases 3–4 planned. Clef is now contract 1.12. Revised after code-owl plan reviews rounds 1–3 (2026-10-09).
 
 ## Goal
 
@@ -44,8 +44,9 @@ Cloudflare Clef (`clef`, `clef-flash`) is the first model added this way.
 5. **Calibration comes from the requested profile, not the reply's model name.** The review rule is decided by the profile that was asked for. A reply model id that matches none of that profile's known reply ids is treated as uncalibrated (strict), never lenient.
 6. **Context size comes from docs.** Probing it would cost too much. It is enforced before sending, with a safety margin when the model's tokenizer is not Jev's.
 7. **Contract.**
-   - 1.10 moves everything to profiles. It adds `CLASSIFIER_PROFILES`, `--probe`, the loader's errors, and two call-log fields, and it makes one deliberate tightening (decision 5).
-   - 1.11 adds Clef and `cost_estimated`.
+   - 1.10 moves everything to profiles. It adds `CLASSIFIER_PROFILES`, the loader's errors, and three call-log fields, and it makes one deliberate tightening (decision 5).
+   - 1.11 adds `--probe`, with `--options` and `--dry-run`.
+   - 1.12 adds Clef and `cost_estimated`.
 
    callers.md states the rule: a minor version adds features, or tightens validation or review with each tightening named in the changelog, and a sheet pinned to an earlier minor version keeps running.
 
@@ -100,7 +101,7 @@ Each profile is one model. Example:
 
 **Calibration and cost**
 - `calibration` plus `reply_models` replace `UNCALIBRATED_FAMILIES` and the name match in `model_family`.
-- `price` produces `cost_estimated` (1.11). It is kept apart from reported `usage.cost`, and is null when the price is unknown.
+- `price` produces `cost_estimated` (1.12). It is kept apart from reported `usage.cost`, and is null when the price is unknown.
 
 ## Workplan
 
@@ -214,7 +215,20 @@ Each profile is one model. Example:
    - a redirect to another host (refused);
    - a suggested patch for a shipped profile that never includes `host`, `endpoint` or `auth`.
 
-### Phase 3. Cloudflare Clef (contract 1.11)
+**Phase 2 build notes (2026-10-09).** Built as planned, as contract 1.11 because 1.10 had already shipped; Clef moves to 1.12.
+- `--probe` takes a model profile id or a provider name. A family profile such as `ollama/nimble` needs a matching `--model`, unless the provider's default model matches.
+- The patch only touches model entries: `reply_models`, `limits.options` with an `_options_probed` date, or a new `user/` model entry for a model without a profile.
+- Probes are logged as `mode: probe`.
+- The fallback profile (step 1) already shipped in Phase 1.
+
+**Phase 2 code review notes (2026-10-09, code-owl, Claude subagent).** Fixed:
+- In `--options`, only a reply that drops options or a refused request (HTTP 400, 413, 422; `CallError.status`) marks the cap. Credit, rate, server, network and redirect failures are marked `inconclusive`, suggest no limit, and exit 1.
+- The patch comes only from answered calls; a failed probe suggests nothing. `_options_probed` is always recorded, as `<date> with <model tag>`.
+- The report and the `--local-only` refusal show the endpoint without its query string or user info; call errors pass through `redact()`.
+- `--probe` with `--provider` exits 2. Docs say the patch is fields to merge.
+- Seven new tests, including a real (not dry-run) OpenAI-shape probe with a mocked `urlopen`.
+
+### Phase 3. Cloudflare Clef (contract 1.12)
 
 1. **Live check, which gates the adapter design.**
    - Make one call per Clef model through `--probe`, using the owner's token from Keychain.
@@ -239,7 +253,7 @@ Each profile is one model. Example:
 6. **Docs.**
    - providers.md: a Cloudflare row and section, including "use a token scoped to Workers AI only" and the env var names.
    - parallel-comparison.md: a Clef arm (`--provider cloudflare/clef`).
-   - callers.md: the 1.11 changelog entry.
+   - callers.md: the 1.12 changelog entry.
 7. **Acceptance:**
    - Fake-server tests cover:
      - success;
@@ -292,7 +306,7 @@ Each profile is one model. Example:
 | 16 | HIGH | Calibration is matched from the reply name, so an unmatched name silently gets the lenient review | Calibration from the requested profile; unmatched names strict | Decision 5; Phase 1 step 8 |
 | 17 | MEDIUM | Limits are not uniform today (Nimble-only token check, global Jev limits) | Reproduce the quirks exactly; pin them, including an Ollama non-Nimble model | Phase 1 step 3 |
 | 18 | MEDIUM | Sheet pins and the call log were not addressed | Pins checked against profile ids; `profile_source` and `profile_hash` in the log | Phase 1 steps 6–7 |
-| 19 | MEDIUM | `cost_estimated` is a log change inside "no behavior change" | Moved to 1.11 and named in the changelog | Phase 3 |
+| 19 | MEDIUM | `cost_estimated` is a log change inside "no behavior change" | Moved to 1.12 and named in the changelog | Phase 3 |
 | 20 | MEDIUM | Contract versioning was loose | The compatibility rule stated in callers.md; a test that a 1.9-pinned sheet runs | Decision 7; Phase 1 |
 | 21 | MEDIUM | The envelope format was assumed before the live check | The live check gates the adapter and the shape name | Phase 3 step 1 |
 | 22 | MEDIUM | The probe could bypass call checks, had no dry run and no cost report | Probe uses the real send path; `--dry-run`; per-call cost | Phase 2 |

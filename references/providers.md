@@ -44,6 +44,15 @@ The review rule comes from the profile that was asked for. Only a calibrated pro
 
 **Your own profiles.** Set `CLASSIFIER_PROFILES` to a JSON file with `providers` and/or `models` objects, in the same format. Every id must start with `user/` and use lowercase letters, digits, and `. _ / -`, and a user file can only add: it cannot change a shipped provider or model, or repeat a shipped provider-and-model pair. A user provider's key is either a shipped key variable or Keychain item used on that key's own host, or a new one named `CLASSIFIER_…` (Keychain: `classifier-…`), so a profiles file cannot pick up an unrelated secret and send it elsewhere. User providers are never chosen automatically; name them with `--provider user/<name>`. A user model with `"match": "family"` covers variants such as `name:tag` of a model whose exact id has no profile, including a shipped provider's, and can mark them calibrated; only add one you have calibrated. An endpoint may use path placeholders such as `{account_id}`, each declared under `params` with an environment variable and a regular expression the whole value must match; every value must also be a single path segment of letters, digits, `_`, and `-`, so it cannot add path segments, a query, or a host. The file must be a regular file of at most 256 KiB; any error stops the run before anything is sent. The call log records `profile`, `profile_source` (`shipped` or `user`), and `profile_hash` for each call.
 
+**Probing a model.** `jev_decide.py --probe <model profile id or provider>` (add `--model` for a provider, or for a family profile such as `ollama/nimble`) sends one tiny request through the normal send path, so the endpoint check, key-to-host rule, https, and no-redirect rule all apply. It prints:
+- the reply's wrapper (`none`, `result` for an envelope this skill does not unwrap yet, or `unknown`);
+- its model id, and whether the profile lists it;
+- its usage fields and cost;
+- any answer errors;
+- a suggested patch.
+
+The patch lists only the fields to merge into one model entry (reply ids, option limit), never a host, endpoint, or credential; it is empty when no call answered, and nothing is written. `--dry-run` prints the requests without sending. `--options` finds the option cap with up to three calls at 26, 64, and 128 options. It replaces only the option limit, only for those calls; a size passes only when every option comes back, so a model that silently drops options is caught. A refused request (HTTP 400, 413, 422) also marks the cap; credit, rate, server, network, or redirect failures leave it unknown, suggest no limit, and exit 1. Run it once when adding a model, and record the result in that model's `limits.options`. The patch's `_options_probed` names the date and the model tag probed; for a family profile, that one tag stands for the family.
+
 ## Ollama System One
 
 Ollama 0.35 and later exposes supported decision models through `/v1/systemone`. Install a model, then call:

@@ -66,7 +66,7 @@ REDACTIONS = (
 SECRET_KEY = re.compile(rf"(?i)(?:x-)?(?:{SECRET_KEYS})")  # an object field whose whole name is a secret key
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.10"
+CONTRACT_VERSION = "1.11"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -91,9 +91,9 @@ class CallError(SystemExit):
     """A provider request failed after its retries (HTTP error, network, non-JSON reply). Exits 1 if uncaught;
     catchers print `message`, so a batch can keep the answers it already has."""
 
-    def __init__(self, message: str):
+    def __init__(self, message: str, status: int | None = None):
         super().__init__(1)
-        self.message = message
+        self.message, self.status = message, status
 
 
 class Exhausted(CallError):
@@ -335,17 +335,21 @@ def limits_for(provider: str, model: Any) -> dict[str, Any]:
             **(found[1].get("limits", {}) if found else {})}
 
 
+def reply_matches(spec: dict[str, Any], reply_model: Any) -> bool:
+    """A reply's model id is one the profile lists, exactly or with a version or variant suffix (-, ., :)."""
+    return isinstance(reply_model, str) and any(
+        reply_model == r or reply_model.startswith(r) and reply_model[len(r)] in "-.:" for r in spec["reply_models"])
+
+
 def is_strict(reply_model: Any, provider: str | None = None, sent_model: Any = None) -> bool:
     """Whether answers get the stricter review. With the provider and model that were asked for, only a calibrated
     profile whose known reply ids match the reply's model is reviewed normally; anything unknown is strict. Without
     them (older callers), any calibrated profile's reply ids decide."""
-    def matches(spec: dict[str, Any]) -> bool:  # the id itself, or it followed by a version or variant suffix
-        return isinstance(reply_model, str) and any(
-            reply_model == r or reply_model.startswith(r) and reply_model[len(r)] in "-.:" for r in spec["reply_models"])
     if provider is None:
-        return not any(spec["calibration"] == "calibrated" and matches(spec) for spec in MODELS.values())
+        return not any(spec["calibration"] == "calibrated" and reply_matches(spec, reply_model)
+                       for spec in MODELS.values())
     found = model_profile(provider, sent_model)
-    return not (found and found[1]["calibration"] == "calibrated" and matches(found[1]))
+    return not (found and found[1]["calibration"] == "calibrated" and reply_matches(found[1], reply_model))
 
 
 def profile_log(provider: str, model: Any) -> dict[str, Any]:
@@ -565,12 +569,14 @@ def check_size(payload: dict[str, Any], where: str = "request", provider: str | 
 TEXT_ALLOWED = {"text": "strings", "text_or_null": "strings or null"}
 
 
-def check_provider_limits(payload: dict[str, Any], provider: str, where: str = "request") -> None:
+def check_provider_limits(payload: dict[str, Any], provider: str, where: str = "request",
+                          overrides: dict[str, int] | None = None) -> None:
     """Refuse requests that exceed a provider's or model's profile limits before any data is sent: question and
-    option counts, text-only instructions or descriptions, then (with state) body bytes and the context window."""
+    option counts, text-only instructions or descriptions, then (with state) body bytes and the context window.
+    `overrides` is for --probe --options only: it raises one limit for one probe call."""
     spec = PROVIDERS[provider]
     label = spec.get("label", spec["name"])
-    limits = limits_for(provider, payload.get("model"))
+    limits = {**limits_for(provider, payload.get("model")), **(overrides or {})}
     rules = spec["profile"].get("text", {})
     questions = payload["questions"]
     if "questions" in limits and len(questions) > limits["questions"]:
@@ -793,7 +799,7 @@ def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: s
             exc.close()
             wait = f" (asked to retry after {asked:.0f}s, longer than the {MAX_RETRY_AFTER:.0f}s this script waits)" \
                 if asked is not None and asked > MAX_RETRY_AFTER and exc.code in RETRY_STATUSES else ""
-            raise CallError(f"{service} returned HTTP {exc.code}{wait}: {body}") from exc
+            raise CallError(f"{service} returned HTTP {exc.code}{wait}: {body}", exc.code) from exc
         except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
             if retry:
                 time.sleep(RETRY_DELAYS[attempt])
@@ -1109,6 +1115,145 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
             raise SystemExit(3)
 
 
+PROBE_STATE = "The sky is blue."
+PROBE_QUESTION = {"type": "noul", "instructions": "Does the text say the sky is blue?"}
+PROBE_OPTION_SIZES = (26, 64, 128)
+PROBE_REFUSED_STATUSES = {400, 413, 422}  # the provider rejected the request itself: evidence of an option cap
+
+
+def probe_target(target: str, model: str | None) -> tuple[str, str, str | None]:
+    """(provider, model, model profile id) for --probe: a model profile id, or a provider name plus --model or its
+    default model."""
+    if target in MODELS:
+        spec = MODELS[target]
+        if spec.get("match", "exact") == "exact":
+            if model and model != spec["model"]:
+                fail(f"--probe {target} is the model {spec['model']!r}; drop --model or probe the provider instead")
+            return spec["provider"], spec["model"], target
+        default = PROVIDERS[spec["provider"]].get("model")
+        chosen = model or default
+        if not chosen or (model_profile(spec["provider"], chosen) or (None,))[0] != target:
+            fail(f"--probe {target} covers {spec['model']}:<tag> models; pass --model with one")
+        return spec["provider"], chosen, target
+    if target not in PROVIDERS:
+        fail(f"--probe takes a model profile id ({', '.join(MODELS)}) or a provider ({', '.join(PROVIDERS)})")
+    spec = PROVIDERS[target]
+    chosen = model or spec.get("model") or os.environ.get(spec.get("model_env", ""), "").strip()
+    if not chosen:
+        fail(f"--probe {target} needs --model")
+    found = model_profile(target, chosen)
+    return target, chosen, found[0] if found else None
+
+
+def probe_reply(response: Any, questions: dict[str, Any], provider: str, model: str) -> dict[str, Any]:
+    """What a probe learned from one reply: wrapper, model id, usage fields, cost, and answer errors."""
+    keys = sorted(response) if isinstance(response, dict) else []
+    wrapper = "none" if "answers" in keys else "result" if isinstance(
+        response, dict) and isinstance(response.get("result"), dict) else "unknown"
+    reply_model = response.get("model") if isinstance(response, dict) else None
+    usage = response.get("usage") if isinstance(response, dict) else None
+    return {"top_level_keys": keys, "wrapper": wrapper, "model": reply_model,
+            "model_known": bool((found := model_profile(provider, model)) and reply_matches(found[1], reply_model)),
+            "usage_fields": sorted(usage) if isinstance(usage, dict) else None,
+            "cost_reported": isinstance(usage, dict) and "cost" in usage, "cost": response_cost(response),
+            "errors": response_errors(response, questions)}
+
+
+def probe_patch(provider: str, model: str, profile_id: str | None, reply_model: str | None,
+                options: int | None) -> dict[str, Any]:
+    """Fields to merge into one model entry, for the person to review: only reply ids and the option limit, never
+    a provider's host, endpoint, or credentials. A model with no profile gets a new user/ entry. Empty unless a
+    call answered (`reply_model` comes only from answered calls)."""
+    if not reply_model:
+        return {}
+    changes: dict[str, Any] = {}
+    if profile_id is None:
+        profile_id = "user/" + re.sub(r"[^a-z0-9._-]+", "-", f"{provider}-{model}".lower()).strip("-")
+        changes = {"provider": provider, "model": model, "calibration": "uncalibrated", "reply_models": [reply_model]}
+    elif not reply_matches(MODELS[profile_id], reply_model):
+        changes["reply_models"] = MODELS[profile_id]["reply_models"] + [reply_model]
+    if options is not None:
+        changes["limits"] = {**MODELS.get(profile_id, {}).get("limits", {}), "options": options,
+                             "_options_probed": f"{datetime.date.today().isoformat()} with {model}"}
+    return {"models": {profile_id: changes}} if changes else {}
+
+
+def safe_endpoint(url: str) -> str:
+    """The endpoint for a printed report: scheme, host, port, and path only, so a query-string key or user info
+    never reaches stdout. (A filled path placeholder, such as an account id, is shown; it is not a credential.)"""
+    parts = urlparse(url)
+    host = parts.hostname or ""
+    return f"{parts.scheme}://{host}{f':{parts.port}' if parts.port else ''}{parts.path}"
+
+
+def run_probe(args: argparse.Namespace) -> None:
+    """--probe: one tiny call (or, with --options, up to three option-cap calls) through the normal send path, so
+    the endpoint check, key-to-host rule, https, and no-redirect rules all apply. Prints a report; writes nothing."""
+    provider, model, profile_id = probe_target(args.probe, args.model)
+    plan = {"steps": [(provider, model)], "host": "other", "host_reason": "probe", "route": None}
+    router = Router(plan, args.endpoint, args.timeout)
+    endpoint = router.current_endpoint()
+    check_endpoint(provider, endpoint)
+    if args.local_only and not is_local(endpoint):
+        fail(f"--local-only: refusing to send to {safe_endpoint(endpoint)!r}, which is not on this machine", code=1)
+    sizes = PROBE_OPTION_SIZES if args.options else (None,)
+    requests = []
+    for size in sizes:
+        question = PROBE_QUESTION if size is None else {
+            "type": "choice", "instructions": "Which option is listed first?",
+            "criteria": {f"o{i}": f"option {i}" for i in range(1, size + 1)}}
+        payload = {"model": model, "state": PROBE_STATE, "questions": {"probe": question}}
+        check_size(payload, "probe", provider)
+        check_provider_limits(payload, provider, "probe", {"options": size} if size else None)
+        requests.append((size, payload))
+    report: dict[str, Any] = {"probe": args.probe, "provider": provider, "model": model, "profile": profile_id,
+                              "endpoint": safe_endpoint(endpoint)}
+    if args.dry_run:
+        report["requests"] = [to_openai_request(p) if PROVIDERS[provider].get("shape") == "openai" else p
+                              for _, p in requests]
+        json.dump(report, sys.stdout, ensure_ascii=False, indent=2)
+        sys.stdout.write("\n")
+        return
+    results, largest, reply_model, total_cost, inconclusive = {}, None, None, 0.0, False
+    started = time.monotonic()
+    for size, payload in requests:
+        call_started = time.monotonic()
+        try:
+            response = router.send(payload)
+        except CallError as exc:
+            # Only a request the provider refused says anything about an option cap; credit, rate, server,
+            # network, and redirect failures leave the cap unknown.
+            outcome: dict[str, Any] = {"ok": False, "error": redact(exc.message)[0]}
+            if size is None or exc.status not in PROBE_REFUSED_STATUSES:
+                inconclusive = outcome["inconclusive"] = True
+        else:
+            outcome = {"ok": True, **probe_reply(response, payload["questions"], provider, model)}
+            outcome["ok"] = not outcome["errors"]
+            total_cost += outcome["cost"]
+            if outcome["ok"]:
+                reply_model = reply_model or outcome["model"]
+        outcome["seconds"] = round(time.monotonic() - call_started, 2)
+        results["single" if size is None else str(size)] = outcome
+        if not outcome["ok"]:
+            break
+        largest = size
+    report["calls"] = results
+    report["cost"] = round(total_cost, 8)
+    if args.options:
+        report["largest_options_ok"] = largest
+    report["suggested_patch"] = probe_patch(provider, model, profile_id, reply_model,
+                                            largest if args.options and not inconclusive else None)
+    args.provider, args.route_log = router.provider, router.log_fields()
+    log_call(args, {}, {"questions": {"probe": PROBE_QUESTION}}, {
+        "mode": "probe", "items": len(results), "invalid": sum(not r["ok"] for r in results.values()),
+        "cost": round(total_cost, 8) or None, "model": [reply_model] if reply_model else [],
+        "seconds": round(time.monotonic() - started, 2)})
+    json.dump(report, sys.stdout, ensure_ascii=False, indent=2)
+    sys.stdout.write("\n")
+    if inconclusive or not largest and not all(r["ok"] for r in results.values()):
+        raise SystemExit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request-file", default="-", help="JSON request file, or - for stdin")
@@ -1131,6 +1276,11 @@ def main() -> None:
                         help="add a decisions object: act / skip / human per question at confidence T (0.5-1)")
     parser.add_argument("--no-redact", action="store_true",
                         help="send state as given, without scrubbing secrets (tokens, keys, passwords) first")
+    parser.add_argument("--probe", metavar="PROFILE",
+                        help="send one tiny request to a model profile id or provider and report the reply's shape, "
+                             "model id, usage fields, and cost, with a suggested profile patch; writes nothing")
+    parser.add_argument("--options", action="store_true",
+                        help="with --probe: find the option cap with up to three calls (26, 64, 128 options)")
     parser.add_argument("--contract-version", action="store_true",
                         help="print the caller contract version (references/callers.md) and exit")
     args = parser.parse_args()
@@ -1138,6 +1288,13 @@ def main() -> None:
         print(CONTRACT_VERSION)
         return
 
+    if args.options and not args.probe:
+        fail("--options needs --probe")
+    if args.probe and args.provider:
+        fail("--probe picks the provider; drop --provider")
+    if args.probe:
+        run_probe(args)
+        return
     if args.threshold is not None and not 0.5 <= args.threshold <= 1:
         fail("--threshold must be between 0.5 and 1")
     plan = plan_route(args.provider, args.model, args.dry_run)
