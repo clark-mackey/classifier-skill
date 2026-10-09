@@ -1,6 +1,6 @@
 # Plan: model profiles, then Cloudflare Clef
 
-Date: 2026-10-09. Status: planned, no code. Contract today: 1.9. Revised after code-owl plan reviews rounds 1–3 (2026-10-09).
+Date: 2026-10-09. Status: Phase 1 built (contract 1.10, uncommitted); Phases 2–4 planned. Revised after code-owl plan reviews rounds 1–3 (2026-10-09).
 
 ## Goal
 
@@ -168,6 +168,16 @@ Each profile is one model. Example:
      - a user profile reusing a shipped key env var with a different host.
    - A sheet pinned to contract `1.9` runs under 1.10.
    - `--contract-version` prints `1.10`.
+
+**Phase 1 build notes (2026-10-09).** Built as planned, with these deviations, each to keep today's behavior:
+- **Two levels, not one profile per model.** `scripts/profiles.json` has `providers` (transport, credentials, shape, fields, text rules, provider limits) and `models` (model id, reply ids, calibration, model limits). Credentials live only on providers, so a model entry can never redirect a key. Clef becomes one `cloudflare` provider plus two model entries.
+- **`fields` and `text` stay as provider keys.** The cut assumed the shape decides them, but OpenRouter and TypeSafe share a shape with different field allowlists, and Ollama and OpenAI have different text rules.
+- **Unknown models keep their provider's limits.** Decision 4's smallest-limits default would have shrunk today's `compatible` runs (Winnow-12B) from Jev's 64k/32k to Nimble's 8k. They get the strict review and a stderr warning instead.
+- **`ollama/nimble` matches by family** (`nimble:9b`, `nimble:4b`), as the Nimble check did before.
+- **Path placeholders (`params`) are built now** with full-match patterns, since the loader owns them; Clef is the first user.
+- Step 8 (calibration from the profile) is in the same change as the move, not a separate commit; the golden snapshot covers everything except review strictness, which has its own tests.
+
+**Phase 1 code review (Claude subagent, 2026-10-09).** No blockers. Fixed: a user provider's credential must be a shipped one on its own host or be named `CLASSIFIER_…` / `classifier-…` (a profiles file could otherwise send `GITHUB_TOKEN` to its own URL); placeholder patterns are compiled at load and every value must also be one path segment of `[A-Za-z0-9_-]`; reply ids match exactly or with a `-`, `.`, or `:` suffix; a malformed shipped `profiles.json` or a missing route profile fails with a message, not a traceback; comment keys are allowed in limits and ignored by `profile_hash`; user ids are lowercase. Documented: Nimble and an unlisted Jev reply id (`jev-1.14`) get the strict review; a user family profile can mark variants calibrated. Kept: `LUNA_ON_OPENROUTER` (tests use it).
 
 ### Phase 2. Probing
 

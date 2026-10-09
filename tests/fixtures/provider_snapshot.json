@@ -1,0 +1,1162 @@
+{
+ "limits": {
+  "compatible|Winnow-12B": {
+   "options": 300,
+   "questions": 200,
+   "state_ascii_chars": 127935,
+   "template_without_state_options": 300,
+   "text_refused": {
+    "choice": null,
+    "choice_null": null,
+    "instructions": null,
+    "noul": null,
+    "noul_null": null,
+    "score": null
+   }
+  },
+  "ollama|nimble:4b": {
+   "options": 26,
+   "questions": 64,
+   "state_ascii_chars": 32682,
+   "template_without_state_options": 26,
+   "text_refused": {
+    "choice": "exit 2",
+    "choice_null": null,
+    "instructions": null,
+    "noul": "exit 2",
+    "noul_null": "exit 2",
+    "score": null
+   }
+  },
+  "ollama|nimble:9b": {
+   "options": 26,
+   "questions": 64,
+   "state_ascii_chars": 32682,
+   "template_without_state_options": 26,
+   "text_refused": {
+    "choice": "exit 2",
+    "choice_null": null,
+    "instructions": null,
+    "noul": "exit 2",
+    "noul_null": "exit 2",
+    "score": null
+   }
+  },
+  "ollama|tev1:4b": {
+   "options": 26,
+   "questions": 64,
+   "state_ascii_chars": 65452,
+   "template_without_state_options": 26,
+   "text_refused": {
+    "choice": "exit 2",
+    "choice_null": null,
+    "instructions": null,
+    "noul": "exit 2",
+    "noul_null": "exit 2",
+    "score": null
+   }
+  },
+  "openai|gpt-6-luna": {
+   "options": 300,
+   "questions": 200,
+   "state_ascii_chars": 127935,
+   "template_without_state_options": 300,
+   "text_refused": {
+    "choice": "exit 2",
+    "choice_null": null,
+    "instructions": "exit 2",
+    "noul": "exit 2",
+    "noul_null": null,
+    "score": "exit 2"
+   }
+  },
+  "openrouter|openai/gpt-6-luna-decisions-20261006": {
+   "options": 300,
+   "questions": 200,
+   "state_ascii_chars": 127935,
+   "template_without_state_options": 300,
+   "text_refused": {
+    "choice": null,
+    "choice_null": null,
+    "instructions": null,
+    "noul": null,
+    "noul_null": null,
+    "score": null
+   }
+  },
+  "openrouter|typesafe/jev-1.13": {
+   "options": 300,
+   "questions": 200,
+   "state_ascii_chars": 127935,
+   "template_without_state_options": 300,
+   "text_refused": {
+    "choice": null,
+    "choice_null": null,
+    "instructions": null,
+    "noul": null,
+    "noul_null": null,
+    "score": null
+   }
+  },
+  "typesafe|jev-1.13.0": {
+   "options": 300,
+   "questions": 200,
+   "state_ascii_chars": 127935,
+   "template_without_state_options": 300,
+   "text_refused": {
+    "choice": null,
+    "choice_null": null,
+    "instructions": null,
+    "noul": null,
+    "noul_null": null,
+    "score": null
+   }
+  }
+ },
+ "providers": {
+  "compatible": {
+   "accepts": {
+    "http://127.0.0.1:11434/v1/systemone": false,
+    "http://localhost:8080/v1/systemone": false,
+    "http://openrouter.ai/x": false,
+    "https://api.openai.com/v1/decisions": false,
+    "https://api.typesafe.ai/v1/systemone": false,
+    "https://evil.example.com/v1/systemone": false,
+    "https://localhost:9/x": false,
+    "https://models.example.com/v1/systemone": true,
+    "https://openrouter.ai/api/alpha/decisions": false
+   },
+   "endpoint": null,
+   "endpoint_with_env": "https://models.example.com/v1/systemone",
+   "endpoint_without_env": "exit 1",
+   "explicit": true,
+   "fields": [
+    "model",
+    "questions",
+    "state"
+   ],
+   "host": null,
+   "key": "CLASSIFIER_COMPATIBLE_KEY",
+   "key_optional": true,
+   "loopback_only": null,
+   "model": null,
+   "model_env": "CLASSIFIER_COMPATIBLE_MODEL",
+   "name": "compatible server",
+   "shape": null,
+   "url_env": "CLASSIFIER_COMPATIBLE_URL"
+  },
+  "ollama": {
+   "accepts": {
+    "http://127.0.0.1:11434/v1/systemone": true,
+    "http://localhost:8080/v1/systemone": true,
+    "http://openrouter.ai/x": false,
+    "https://api.openai.com/v1/decisions": false,
+    "https://api.typesafe.ai/v1/systemone": false,
+    "https://evil.example.com/v1/systemone": false,
+    "https://localhost:9/x": true,
+    "https://models.example.com/v1/systemone": false,
+    "https://openrouter.ai/api/alpha/decisions": false
+   },
+   "endpoint": "http://127.0.0.1:11434/v1/systemone",
+   "endpoint_with_env": "http://127.0.0.1:11434/v1/systemone",
+   "endpoint_without_env": "http://127.0.0.1:11434/v1/systemone",
+   "explicit": true,
+   "fields": [
+    "model",
+    "questions",
+    "state"
+   ],
+   "host": null,
+   "key": null,
+   "key_optional": true,
+   "loopback_only": true,
+   "model": "nimble:9b",
+   "model_env": null,
+   "name": "Ollama",
+   "shape": null,
+   "url_env": null
+  },
+  "openai": {
+   "accepts": {
+    "http://127.0.0.1:11434/v1/systemone": false,
+    "http://localhost:8080/v1/systemone": false,
+    "http://openrouter.ai/x": false,
+    "https://api.openai.com/v1/decisions": true,
+    "https://api.typesafe.ai/v1/systemone": false,
+    "https://evil.example.com/v1/systemone": false,
+    "https://localhost:9/x": false,
+    "https://models.example.com/v1/systemone": false,
+    "https://openrouter.ai/api/alpha/decisions": false
+   },
+   "endpoint": "https://api.openai.com/v1/decisions",
+   "endpoint_with_env": "https://api.openai.com/v1/decisions",
+   "endpoint_without_env": "https://api.openai.com/v1/decisions",
+   "explicit": true,
+   "fields": [
+    "model",
+    "questions",
+    "state"
+   ],
+   "host": "api.openai.com",
+   "key": "OPENAI_API_KEY",
+   "key_optional": null,
+   "loopback_only": null,
+   "model": "gpt-6-luna",
+   "model_env": null,
+   "name": "OpenAI",
+   "shape": "openai",
+   "url_env": null
+  },
+  "openrouter": {
+   "accepts": {
+    "http://127.0.0.1:11434/v1/systemone": false,
+    "http://localhost:8080/v1/systemone": false,
+    "http://openrouter.ai/x": false,
+    "https://api.openai.com/v1/decisions": false,
+    "https://api.typesafe.ai/v1/systemone": false,
+    "https://evil.example.com/v1/systemone": false,
+    "https://localhost:9/x": false,
+    "https://models.example.com/v1/systemone": false,
+    "https://openrouter.ai/api/alpha/decisions": true
+   },
+   "endpoint": "https://openrouter.ai/api/alpha/decisions",
+   "endpoint_with_env": "https://openrouter.ai/api/v2/decisions",
+   "endpoint_without_env": "https://openrouter.ai/api/alpha/decisions",
+   "explicit": null,
+   "fields": null,
+   "host": "openrouter.ai",
+   "key": "OPENROUTER_API_KEY",
+   "key_optional": null,
+   "loopback_only": null,
+   "model": "typesafe/jev-1.13",
+   "model_env": null,
+   "name": "OpenRouter",
+   "shape": null,
+   "url_env": null
+  },
+  "typesafe": {
+   "accepts": {
+    "http://127.0.0.1:11434/v1/systemone": false,
+    "http://localhost:8080/v1/systemone": false,
+    "http://openrouter.ai/x": false,
+    "https://api.openai.com/v1/decisions": false,
+    "https://api.typesafe.ai/v1/systemone": true,
+    "https://evil.example.com/v1/systemone": false,
+    "https://localhost:9/x": false,
+    "https://models.example.com/v1/systemone": false,
+    "https://openrouter.ai/api/alpha/decisions": false
+   },
+   "endpoint": "https://api.typesafe.ai/v1/systemone",
+   "endpoint_with_env": "https://api.typesafe.ai/v1/systemone",
+   "endpoint_without_env": "https://api.typesafe.ai/v1/systemone",
+   "explicit": null,
+   "fields": [
+    "model",
+    "questions",
+    "state"
+   ],
+   "host": "api.typesafe.ai",
+   "key": "TYPESAFE_API_KEY",
+   "key_optional": null,
+   "loopback_only": null,
+   "model": "jev-1.13.0",
+   "model_env": null,
+   "name": "TypeSafe",
+   "shape": null,
+   "url_env": null
+  }
+ },
+ "route": {
+  "CLASSIFIER_COMPATIBLE_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "CLASSIFIER_COMPATIBLE_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "CLASSIFIER_COMPATIBLE_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "CLASSIFIER_COMPATIBLE_KEY|apikey|send": {
+   "exit": 1
+  },
+  "CLASSIFIER_COMPATIBLE_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "CLASSIFIER_COMPATIBLE_KEY|openrouter|send": {
+   "exit": 1
+  },
+  "OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|send": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ]
+   ]
+  },
+  "OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|send": {
+   "exit": 1
+  },
+  "OPENAI_API_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENAI_API_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENAI_API_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENAI_API_KEY|apikey|send": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ]
+   ]
+  },
+  "OPENAI_API_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENAI_API_KEY|openrouter|send": {
+   "exit": 1
+  },
+  "OPENROUTER_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|send": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY|apikey|send": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,OPENAI_API_KEY|openrouter|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|send": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY|apikey|send": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY|openrouter|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY|apikey|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY|openrouter|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY|apikey|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "OPENROUTER_API_KEY|openrouter|send": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "typesafe",
+     null
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "typesafe",
+     null
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|send": {
+   "exit": 1
+  },
+  "TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|send": {
+   "exit": 1
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "typesafe",
+     null
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "typesafe",
+     null
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|apikey|send": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY|openrouter|send": {
+   "exit": 1
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "typesafe",
+     null
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "typesafe",
+     null
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY|apikey|send": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY,OPENAI_API_KEY|openrouter|send": {
+   "exit": 1
+  },
+  "TYPESAFE_API_KEY|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "typesafe",
+     null
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "typesafe",
+     null
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY|apikey|send": {
+   "exit": 1
+  },
+  "TYPESAFE_API_KEY|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "TYPESAFE_API_KEY|openrouter|send": {
+   "exit": 1
+  },
+  "bad_route": "exit 2",
+  "none|-|dry": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "none|-|send": {
+   "route": null,
+   "steps": [
+    [
+     "openrouter",
+     null
+    ]
+   ]
+  },
+  "none|apikey|dry": {
+   "route": "apikey",
+   "steps": [
+    [
+     "openai",
+     "gpt-6-luna"
+    ],
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "none|apikey|send": {
+   "exit": 1
+  },
+  "none|openrouter|dry": {
+   "route": "openrouter",
+   "steps": [
+    [
+     "openrouter",
+     "openai/gpt-6-luna-decisions-20261006"
+    ]
+   ]
+  },
+  "none|openrouter|send": {
+   "exit": 1
+  }
+ },
+ "select": {
+  "CLASSIFIER_COMPATIBLE_KEY": "openrouter",
+  "OPENAI_API_KEY": "openrouter",
+  "OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY": "openrouter",
+  "OPENROUTER_API_KEY": "openrouter",
+  "OPENROUTER_API_KEY,CLASSIFIER_COMPATIBLE_KEY": "openrouter",
+  "OPENROUTER_API_KEY,OPENAI_API_KEY": "openrouter",
+  "OPENROUTER_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY": "openrouter",
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY": "openrouter",
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY": "openrouter",
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY": "openrouter",
+  "OPENROUTER_API_KEY,TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY": "openrouter",
+  "TYPESAFE_API_KEY": "typesafe",
+  "TYPESAFE_API_KEY,CLASSIFIER_COMPATIBLE_KEY": "typesafe",
+  "TYPESAFE_API_KEY,OPENAI_API_KEY": "typesafe",
+  "TYPESAFE_API_KEY,OPENAI_API_KEY,CLASSIFIER_COMPATIBLE_KEY": "typesafe",
+  "none": "openrouter"
+ }
+}

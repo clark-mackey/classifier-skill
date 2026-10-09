@@ -1082,7 +1082,7 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([l["id"] for l in lines], [i["term"] for i in self.ITEMS])
         self.assertTrue(all(l["versions"] == {"sheet": "test-terms@2", "recipe": None, "model": "typesafe/jev-1.13",
-                                              "contract": "1.9", "context": "02f189c76132"} for l in lines))
+                                              "contract": "1.10", "context": "02f189c76132"} for l in lines))
         self.assertEqual((summary["complete"], summary["items_in"], summary["items_out"], summary["answered"]),
                          (True, 4, 4, 4))
         self.assertIn("Classifier: 4/0/0 (none)", err)
@@ -1201,7 +1201,7 @@ class ItemsEngine(unittest.TestCase):
 
     def test_contract_version(self):
         result = run("classify_items.py", "--contract-version")
-        self.assertEqual(result.stdout.strip(), "1.9")
+        self.assertEqual(result.stdout.strip(), "1.10")
 
     def test_context_file_replaces_sheet_context(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2008,3 +2008,261 @@ class SeniorReviewRegressions(unittest.TestCase):
                          {'usage': {'cost': -1}}, {'usage': {'cost': 'Infinity', 'input_tokens': float('inf')}}):
             self.assertEqual(module.response_cost(response), 0)
             self.assertEqual(module.usage_tokens(response), 0)
+
+
+class Profiles(unittest.TestCase):
+    """Contract 1.10: provider and model settings come from scripts/profiles.json, plus a user file that may only
+    add user/ ids (context/plan-model-profiles-2026-10-09.md, Phase 1)."""
+
+    USER_PROVIDER = {"name": "Example", "endpoint": "https://models.example.com/v1/systemone",
+                     "host": "models.example.com", "auth": {"env": "CLASSIFIER_EXAMPLE_KEY"}, "shape": "system-one",
+                     "model": "ex-1"}
+
+    def load(self, user=None, raw=None):
+        """Load jev_decide.py with an optional user profiles file; returns the module."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"CLASSIFIER_PROFILES": ""}
+            if user is not None or raw is not None:
+                path = Path(tmp) / "profiles.json"
+                path.write_text(raw if raw is not None else json.dumps(user))
+                env["CLASSIFIER_PROFILES"] = str(path)
+            with mock.patch.dict(os.environ, env), mock.patch.object(sys, "stderr", io.StringIO()):
+                return load_module()
+
+    def refused(self, user=None, raw=None, path=None):
+        with mock.patch.object(sys, "stderr", io.StringIO()) as err, self.assertRaises(SystemExit):
+            if path is not None:
+                with mock.patch.dict(os.environ, {"CLASSIFIER_PROFILES": str(path)}):
+                    load_module()
+            else:
+                self.load(user, raw)
+        return err.getvalue()
+
+    def test_resolved_providers_match_the_golden_snapshot(self):
+        sys.path.insert(0, str(SCRIPTS.parent / "tests"))
+        try:
+            import provider_snapshot
+        finally:
+            sys.path.pop(0)
+        with mock.patch.object(sys, "stderr", io.StringIO()):
+            current = provider_snapshot.snapshot()
+        self.assertEqual(current, json.loads(provider_snapshot.FIXTURE.read_text()))
+
+    def test_contract_version(self):
+        self.assertEqual(run("jev_decide.py", "--contract-version").stdout.strip(), "1.10")
+
+    def test_openrouter_url_override_stays_on_its_host(self):
+        module = self.load()
+        with mock.patch.dict(os.environ, {"OPENROUTER_DECISIONS_URL": "https://evil.example.com/decisions"}):
+            endpoint = module.provider_endpoint("openrouter")
+        with mock.patch.object(sys, "stderr", io.StringIO()), self.assertRaises(SystemExit):
+            module.check_endpoint("openrouter", endpoint)
+
+    def test_user_provider_is_added_but_never_auto_selected(self):
+        module = self.load({"providers": {"user/example": self.USER_PROVIDER}})
+        self.assertIn("user/example", module.PROVIDERS)
+        self.assertTrue(module.PROVIDERS["user/example"]["explicit"])
+        with mock.patch.dict(os.environ, {"CLASSIFIER_EXAMPLE_KEY": "k", "OPENROUTER_API_KEY": "", "TYPESAFE_API_KEY": ""}):
+            self.assertEqual(module.select_provider(None), "openrouter")
+            self.assertEqual(module.select_provider("user/example"), "user/example")
+        self.assertEqual(module.profile_log("user/example", "ex-1")["profile_source"], "user")
+        self.assertEqual(module.profile_log("openrouter", "typesafe/jev-1.13")["profile_source"], "shipped")
+
+    def test_user_file_errors(self):
+        good = self.USER_PROVIDER
+        cases = {
+            "unknown key": {"providers": {"user/x": {**good, "colour": "red"}}},
+            "no user/ prefix": {"providers": {"example": good}},
+            "shipped key off its host": {"providers": {"user/x": {**good, "auth": {"env": "OPENROUTER_API_KEY"}}}},
+            "shipped keychain off its host": {"providers": {"user/x": {
+                **good, "auth": {"env": "CLASSIFIER_EXAMPLE_KEY", "keychain": "openai-api-key"}}}},
+            "compatible key reused": {"providers": {"user/x": {**good, "auth": {"env": "CLASSIFIER_COMPATIBLE_KEY"}}}},
+            "plain http": {"providers": {"user/x": {**good, "endpoint": "http://models.example.com/x"}}},
+            "endpoint off host": {"providers": {"user/x": {**good, "endpoint": "https://other.example.com/x"}}},
+            "placeholder without param": {"providers": {"user/x": {**good, "endpoint": "https://models.example.com/{a}"}}},
+            "placeholder in host": {"providers": {"user/x": {
+                **good, "endpoint": "https://{a}.example.com/x",
+                "params": {"a": {"env": "A", "pattern": "[a-z]+"}}}}},
+            "repeated model": {"models": {"user/jev": {"provider": "openrouter", "model": "typesafe/jev-1.13",
+                                                       "calibration": "calibrated", "reply_models": ["x"]}}},
+            "model for unknown provider": {"models": {"user/m": {"provider": "nope", "model": "m",
+                                                                 "calibration": "uncalibrated", "reply_models": ["m"]}}},
+            "not an object": [],
+            "unrelated secret env": {"providers": {"user/x": {**good, "auth": {"env": "AWS_SECRET_ACCESS_KEY"}}}},
+            "unrelated secret, url from env": {"providers": {"user/x": {
+                "name": "X", "shape": "system-one", "auth": {"env": "GITHUB_TOKEN"}, "endpoint_env": "ATTACK_URL",
+                "model": "m"}}},
+            "unrelated keychain item": {"providers": {"user/x": {
+                **good, "auth": {"env": "CLASSIFIER_EXAMPLE_KEY", "keychain": "github-token"}}}},
+            "uppercase id": {"providers": {"user/Example": good}},
+            "invalid param pattern": {"providers": {"user/x": {
+                **good, "endpoint": "https://models.example.com/{a}", "params": {"a": {"env": "A", "pattern": "("}}}}},
+        }
+        for name, user in cases.items():
+            with self.subTest(name):
+                self.refused(user)
+        with self.subTest("invalid JSON"):
+            self.refused(raw="{not json")
+        with self.subTest("oversized"):
+            self.refused(raw=json.dumps({"_pad": "x" * (256 * 1024)}))
+        with tempfile.TemporaryDirectory() as tmp, self.subTest("symlink to a directory"):
+            link = Path(tmp) / "link.json"
+            link.symlink_to(Path(tmp))
+            self.refused(path=link)
+
+    def test_comment_keys_are_allowed_in_limits(self):
+        user = {"providers": {"user/x": {**self.USER_PROVIDER, "limits": {"_why": "docs", "options": 3}}}}
+        self.assertEqual(self.load(user).limits_for("user/x", "ex-1")["options"], 3)
+
+    def test_malformed_shipped_profiles_fail_cleanly(self):
+        module = self.load()
+        shipped = json.loads(module.PROFILES_FILE.read_text())
+        broken = {"no models": {k: v for k, v in shipped.items() if k != "models"},
+                  "no defaults limits": {**shipped, "defaults": {}},
+                  "route profile removed": {**shipped, "models": {k: v for k, v in shipped["models"].items()
+                                                                  if k != "openrouter/gpt-6-luna"}}}
+        for name, data in broken.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "profiles.json"
+                path.write_text(json.dumps(data))
+                with mock.patch.object(module, "PROFILES_FILE", path), \
+                        mock.patch.object(sys, "stderr", io.StringIO()) as err, self.assertRaises(SystemExit) as caught:
+                    module.load_profiles()
+                self.assertEqual(caught.exception.code, 2)
+                self.assertIn("classifier-skill:", err.getvalue())
+
+    def test_profile_hash_ignores_comments(self):
+        module = self.load()
+        before = module.profile_log("openrouter", "typesafe/jev-1.13")["profile_hash"]
+        module.PROVIDERS["openrouter"]["profile"]["_doc"] = "edited comment"
+        self.assertEqual(module.profile_log("openrouter", "typesafe/jev-1.13")["profile_hash"], before)
+
+    def test_router_strict_and_log_follow_the_answering_step(self):
+        module = self.load()
+        plan = {"steps": [("openai", "gpt-6-luna"), ("openrouter", module.LUNA_ON_OPENROUTER)],
+                "host": "codex", "host_reason": "CLASSIFIER_HOST", "route": "apikey"}
+        calls = []
+
+        def fake_call(payload, endpoint, timeout, provider="openrouter"):
+            calls.append((provider, payload["model"]))
+            if provider == "openai":
+                raise module.Exhausted("insufficient_quota")
+            return {"model": "openai/gpt-6-luna-decisions-20261006", "answers": {}}
+
+        router = module.Router(plan, None, 5)
+        with mock.patch.object(module, "call_jev", fake_call), mock.patch.object(sys, "stderr", io.StringIO()):
+            response = router.send({"model": "ignored", "questions": {}, "state": "s"})
+        self.assertEqual(calls, [("openai", "gpt-6-luna"), ("openrouter", module.LUNA_ON_OPENROUTER)])
+        self.assertTrue(router.strict(response["model"]))  # Luna is uncalibrated on every step
+        fields = router.log_fields()
+        self.assertEqual((fields["provider_final"], fields["profile"]), ("openrouter", "openrouter/gpt-6-luna"))
+        self.assertEqual(fields["moves"], [{"from": "openai", "to": "openrouter", "reason": "exhausted"}])
+        jev_router = module.Router({"steps": [("openrouter", None)], "host": "other", "host_reason": "default",
+                                    "route": None}, None, 5)
+        with mock.patch.object(module, "call_jev", lambda *a, **k: {"model": "typesafe/jev-1.13-20260917"}):
+            jev_router.send({"model": "typesafe/jev-1.13", "questions": {}, "state": "s"})
+        self.assertFalse(jev_router.strict("typesafe/jev-1.13-20260917"))
+        self.assertEqual(jev_router.log_fields()["profile"], "openrouter/jev-1.13")
+
+    def test_shipped_key_on_its_own_host_is_allowed(self):
+        same_host = {**self.USER_PROVIDER, "endpoint": "https://openrouter.ai/api/beta/decisions",
+                     "host": "openrouter.ai", "auth": {"env": "OPENROUTER_API_KEY"}}
+        module = self.load({"providers": {"user/openrouter-beta": same_host}})
+        self.assertIn("user/openrouter-beta", module.PROVIDERS)
+
+    def test_path_placeholders_must_match_in_full(self):
+        user = {"providers": {"user/acct": {**self.USER_PROVIDER,
+                                            "endpoint": "https://models.example.com/accounts/{account_id}/run",
+                                            "params": {"account_id": {"env": "ACCT_ID", "pattern": "[0-9a-f]{32}"}}}}}
+        module = self.load(user)
+        good = "0123456789abcdef0123456789abcdef"
+        with mock.patch.dict(os.environ, {"ACCT_ID": good}):
+            self.assertEqual(module.provider_endpoint("user/acct"),
+                             f"https://models.example.com/accounts/{good}/run")
+        loose = {"providers": {"user/loose": {**user["providers"]["user/acct"],
+                                              "params": {"account_id": {"env": "ACCT_ID", "pattern": ".*"}}}}}
+        loose_module = self.load(loose)
+        for bad in ("../../x?q=1#", "a/b", "a b", ""):
+            with self.subTest(loose=bad), mock.patch.dict(os.environ, {"ACCT_ID": bad}), \
+                    mock.patch.object(sys, "stderr", io.StringIO()), self.assertRaises(SystemExit):
+                loose_module.provider_endpoint("user/loose")
+        for bad in ("", good + "\n", good + "/../x", good[:-1] + "?", "../" + good, good + "@evil.example.com"):
+            with self.subTest(bad=bad), mock.patch.dict(os.environ, {"ACCT_ID": bad}), \
+                    mock.patch.object(sys, "stderr", io.StringIO()), self.assertRaises(SystemExit):
+                module.provider_endpoint("user/acct")
+
+    def test_calibration_comes_from_the_requested_profile(self):
+        module = self.load()
+        answers = {"q": {"type": "noul", "noul": 0.68}}
+        # Jev asked for and Jev answered: the normal review
+        self.assertFalse(module.is_strict("typesafe/jev-1.13-20260917", "openrouter", "typesafe/jev-1.13"))
+        self.assertEqual(module.review_flags(answers, 0.2, None, False), {})
+        # a reply id the profile does not know is strict, even when it looks like Jev
+        self.assertTrue(module.is_strict("typesafe/other", "openrouter", "typesafe/jev-1.13"))
+        self.assertTrue(module.is_strict("typesafe/jev-1.130", "openrouter", "typesafe/jev-1.13"))
+        self.assertFalse(module.is_strict("jev-1.13.0", "typesafe", "jev-1.13.0"))
+        # uncalibrated profiles and models with no profile are strict
+        self.assertTrue(module.is_strict("nimble:9b", "ollama", "nimble:9b"))
+        self.assertTrue(module.is_strict("tev1:4b", "ollama", "tev1:4b"))
+        self.assertTrue(module.is_strict("Winnow-12B", "compatible", "Winnow-12B"))
+        self.assertIn("q", module.review_flags(answers, 0.2, None, True))
+
+    def test_unprofiled_model_warns(self):
+        module = self.load()
+        with mock.patch.object(sys, "stderr", io.StringIO()) as err:
+            module.note_unprofiled("ollama", "nimble:4b")
+            self.assertEqual(err.getvalue(), "")
+            module.note_unprofiled("ollama", "tev1:4b")
+        self.assertIn("no profile for ollama model 'tev1:4b'", err.getvalue())
+
+    def test_router_logs_the_profile(self):
+        module = self.load()
+        router = module.Router({"steps": [("openrouter", None)], "host": "other", "host_reason": "default",
+                                "route": None}, None, 5)
+        fields = router.log_fields("typesafe/jev-1.13")
+        self.assertEqual(fields["profile"], "openrouter/jev-1.13")
+        self.assertEqual(fields["profile_source"], "shipped")
+        self.assertRegex(fields["profile_hash"], r"^[0-9a-f]{12}$")
+
+
+class SheetPins(unittest.TestCase):
+    """Both of today's sheet model pin forms keep working; a profile id is a new, additive form."""
+
+    def setUp(self):
+        with mock.patch.object(sys, "stderr", io.StringIO()):
+            self.engine = load_engine()
+
+    def pin(self, pinned, provider):
+        with mock.patch.object(sys, "stderr", io.StringIO()) as err:
+            model = self.engine.sheet_model({"model": pinned}, provider)
+        return model, err.getvalue()
+
+    def test_pin_forms(self):
+        self.assertEqual(self.pin("typesafe/jev-1.13", "openrouter"), ("typesafe/jev-1.13", ""))
+        model, err = self.pin("typesafe/jev-1.13", "ollama")
+        self.assertIsNone(model)
+        self.assertIn("OpenRouter id", err)
+        self.assertEqual(self.pin({"ollama": "tev1:4b"}, "ollama")[0], "tev1:4b")
+        self.assertIsNone(self.pin({"ollama": "tev1:4b"}, "openrouter")[0])
+        self.assertEqual(self.pin("ollama/nimble", "openrouter")[0], None)
+        self.assertEqual(self.pin("openai/gpt-6-luna", "openai")[0], "gpt-6-luna")
+
+    def test_unknown_provider_key_is_an_error_and_old_contract_sheets_still_run(self):
+        sheet = {"sheet": "t", "version": 1, "contract": "1.9", "data": "cloud_ok", "min_items": 1,
+                 "fields": {"id": "id", "card": ["text"]},
+                 "questions": {"q": {"type": "noul", "instructions": "Relevant?", "threshold": 0.9}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {n: Path(tmp) / n for n in ("sheet.json", "items.jsonl", "out.jsonl", "summary.json")}
+            paths["items.jsonl"].write_text(json.dumps({"id": "a", "text": "x"}) + "\n")
+            args = ["--sheet", str(paths["sheet.json"]), "--items", str(paths["items.jsonl"]),
+                    "--out", str(paths["out.jsonl"]), "--summary", str(paths["summary.json"]), "--dry-run"]
+            paths["sheet.json"].write_text(json.dumps(sheet))
+            self.assertEqual(run("classify_items.py", *args).returncode, 0)
+            paths["sheet.json"].write_text(json.dumps({**sheet, "model": {"nope": "m"}}))
+            result = run("classify_items.py", *args)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("provider -> model id", result.stderr)
+            paths["sheet.json"].write_text(json.dumps({**sheet, "model": {"ollama": "tev1:4b"}}))
+            result = run("classify_items.py", *args, "--provider", "ollama")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("no profile for ollama model 'tev1:4b'", result.stderr)

@@ -1,0 +1,84 @@
+{
+  "_doc": "Provider and model profiles for jev_decide.py (context/plan-model-profiles-2026-10-09.md, references/providers.md). Providers hold transport and credentials; models hold limits, calibration, and the model ids a reply may report. A user file (CLASSIFIER_PROFILES) may only add ids starting with user/.",
+  "defaults": {
+    "limits": {"request_tokens": 64000, "state_question_tokens": 32000,
+               "_source": "jev-1.13, TypeSafe models page, 2026-09-25"}
+  },
+  "providers": {
+    "openrouter": {
+      "name": "OpenRouter",
+      "endpoint": "https://openrouter.ai/api/alpha/decisions",
+      "endpoint_env": "OPENROUTER_DECISIONS_URL",
+      "host": "openrouter.ai",
+      "auth": {"env": "OPENROUTER_API_KEY", "keychain": "openrouter-api-key"},
+      "shape": "system-one",
+      "model": "typesafe/jev-1.13"
+    },
+    "typesafe": {
+      "name": "TypeSafe",
+      "endpoint": "https://api.typesafe.ai/v1/systemone",
+      "host": "api.typesafe.ai",
+      "auth": {"env": "TYPESAFE_API_KEY"},
+      "shape": "system-one",
+      "model": "jev-1.13.0",
+      "fields": ["model", "state", "questions"],
+      "_fields": "System One accepts no routing extras"
+    },
+    "ollama": {
+      "name": "Ollama",
+      "endpoint": "http://127.0.0.1:11434/v1/systemone",
+      "loopback_only": true,
+      "auth": {"env": null, "optional": true},
+      "shape": "system-one",
+      "model": "nimble:9b",
+      "fields": ["model", "state", "questions"],
+      "label": "Ollama System One",
+      "limits": {"questions": 64, "options": 26, "body_bytes": 65536},
+      "text": {"choice": "text_or_null", "noul": "text"}
+    },
+    "compatible": {
+      "name": "compatible server",
+      "endpoint_env": "CLASSIFIER_COMPATIBLE_URL",
+      "model_env": "CLASSIFIER_COMPATIBLE_MODEL",
+      "auth": {"env": "CLASSIFIER_COMPATIBLE_KEY", "optional": true},
+      "shape": "system-one",
+      "fields": ["model", "state", "questions"],
+      "_doc": "Any server that speaks the System One shapes. Configured by environment, chosen only explicitly; its optional key goes only to the configured URL's host, and plain http is allowed only on this machine."
+    },
+    "openai": {
+      "name": "OpenAI",
+      "endpoint": "https://api.openai.com/v1/decisions",
+      "host": "api.openai.com",
+      "auth": {"env": "OPENAI_API_KEY", "keychain": "openai-api-key"},
+      "shape": "openai",
+      "model": "gpt-6-luna",
+      "fields": ["model", "state", "questions"],
+      "label": "OpenAI Decisions",
+      "text": {"instructions": "text", "choice": "text_or_null", "noul": "text_or_null", "score": "text_or_null"},
+      "_doc": "gpt-6-luna has no dated snapshot yet, so the reply's model id is recorded to catch drift."
+    }
+  },
+  "models": {
+    "openrouter/jev-1.13": {
+      "provider": "openrouter", "model": "typesafe/jev-1.13",
+      "reply_models": ["typesafe/jev-1.13"], "calibration": "calibrated"
+    },
+    "openrouter/gpt-6-luna": {
+      "provider": "openrouter", "model": "openai/gpt-6-luna-decisions-20261006",
+      "reply_models": ["openai/gpt-6-luna"], "calibration": "uncalibrated"
+    },
+    "typesafe/jev-1.13.0": {
+      "provider": "typesafe", "model": "jev-1.13.0",
+      "reply_models": ["jev-1.13", "typesafe/jev-1.13"], "calibration": "calibrated"
+    },
+    "openai/gpt-6-luna": {
+      "provider": "openai", "model": "gpt-6-luna",
+      "reply_models": ["gpt-6-luna"], "calibration": "uncalibrated"
+    },
+    "ollama/nimble": {
+      "provider": "ollama", "model": "nimble", "match": "family",
+      "reply_models": ["nimble"], "calibration": "uncalibrated",
+      "label": "Nimble", "limits": {"context_tokens": 8192}
+    }
+  }
+}

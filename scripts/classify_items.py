@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Judge a list of items with a question sheet: items JSONL in, one stamped line per item out, plus a summary.
 
-This is the engine behind the sheet procedure (references/sheets.md) and contract 1.9 (references/callers.md). A caller supplies
+This is the engine behind the sheet procedure (references/sheets.md) and contract 1.10 (references/callers.md). A caller supplies
 data only: a sheet (questions, which item fields go on each card, thresholds, data rule) and the items. Everything else
 stays in here: cards, redaction, size limits, provider choice, retries, answer validation, and dispositions.
 
@@ -93,7 +93,8 @@ def load_sheet(path: str) -> tuple[dict[str, Any], dict[str, dict[str, Any]], di
     if pinned is not None and not (isinstance(pinned, str) and pinned.strip() or isinstance(pinned, dict) and pinned
                                    and all(k in jev.PROVIDERS and isinstance(v, str) and v.strip()
                                            for k, v in pinned.items())):
-        jev.fail(f"sheet `model` must be a model id or an object of provider -> model id ({', '.join(jev.PROVIDERS)})")
+        jev.fail(f"sheet `model` must be a model id, a profile id ({', '.join(jev.MODELS)}), or an object of "
+                 f"provider -> model id ({', '.join(jev.PROVIDERS)})")
     if "context" in sheet and not (isinstance(sheet["context"], str) and sheet["context"].strip()):
         jev.fail("sheet `context` must be a non-empty string")
 
@@ -169,11 +170,19 @@ def dispositions(answers: dict[str, Any], review: dict[str, list[str]],
 
 
 def sheet_model(sheet: dict[str, Any], provider: str) -> str | None:
-    """The sheet's pinned model for this provider. Model ids differ by provider, so a pin is either an object keyed by
-    provider or a string, which is an OpenRouter id and applies only there."""
+    """The sheet's pinned model for this provider. Model ids differ by provider, so a pin is an object keyed by
+    provider, a model profile id (profiles.json; it applies only on its own provider), or any other string, which is
+    an OpenRouter id and applies only there."""
     pinned = sheet.get("model")
     if isinstance(pinned, dict):
         return pinned.get(provider)
+    if isinstance(pinned, str) and pinned in jev.MODELS:
+        profile = jev.MODELS[pinned]
+        if profile["provider"] == provider:
+            return profile["model"]
+        print(f"classifier-skill: sheet model {pinned!r} is a {profile['provider']} profile; using the {provider} "
+              "default instead", file=sys.stderr)
+        return None
     if pinned and provider != "openrouter":
         print(f"classifier-skill: sheet model {pinned!r} is an OpenRouter id; using the {provider} default instead "
               f"(pin per provider with {{\"{provider}\": ...}})", file=sys.stderr)
@@ -271,6 +280,8 @@ def main() -> None:
     model = ((None if plan["route"] else sheet_model(sheet, args.provider)) or plan["steps"][0][1]
              or spec.get("model") or os.environ.get(spec.get("model_env", ""), "").strip())
     template = jev.normalize_request({"questions": questions}, None, batch=True, default_model=model)
+    for provider, pinned in plan["steps"]:
+        jev.note_unprofiled(provider, pinned or template["model"])
     for provider, _ in plan["steps"]:
         jev.check_provider_limits(template, provider)
     accepted = set.intersection(*(set(jev.PROVIDERS[p].get("fields", jev.ALLOWED_FIELDS)) for p, _ in plan["steps"]))
@@ -315,9 +326,10 @@ def main() -> None:
                 redacted += n
             payload = {**template, "state": state}
             try:
-                jev.check_size(payload, f"item {item_id!r}")
-                for provider, _ in plan["steps"]:
-                    jev.check_provider_limits(payload, provider, f"item {item_id!r}")
+                for provider, pinned in plan["steps"]:
+                    step_payload = {**payload, "model": pinned or payload["model"]}
+                    jev.check_size(step_payload, f"item {item_id!r}", provider)
+                    jev.check_provider_limits(step_payload, provider, f"item {item_id!r}")
             except SystemExit:
                 unanswered(item_id, "too_large")
                 continue
@@ -341,7 +353,8 @@ def main() -> None:
             answers = response["answers"]
             if isinstance(response.get("model"), str):
                 models.add(response["model"])
-            review = jev.review_flags(answers, float(sheet.get("margin", 0.2)), response.get("model"))
+            review = jev.review_flags(answers, float(sheet.get("margin", 0.2)), response.get("model"),
+                                      args.router.strict(response.get("model")))
             marks = dispositions(answers, review, thresholds)
             counts["answered"] += 1
             flagged += bool(review)

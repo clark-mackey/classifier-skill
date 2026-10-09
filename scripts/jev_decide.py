@@ -25,54 +25,29 @@ from pathlib import Path
 from typing import Any, NoReturn
 from urllib.parse import urlparse
 
-# Each provider's key is only ever sent to that provider's host. Default models are pinned versions, not aliases,
-# so answers stay comparable; pass --model to change.
-PROVIDERS = {
-    "openrouter": {"endpoint": "https://openrouter.ai/api/alpha/decisions", "host": "openrouter.ai",
-                   "key": "OPENROUTER_API_KEY", "model": "typesafe/jev-1.13", "name": "OpenRouter"},
-    "typesafe": {"endpoint": "https://api.typesafe.ai/v1/systemone", "host": "api.typesafe.ai",
-                 "key": "TYPESAFE_API_KEY", "model": "jev-1.13.0", "name": "TypeSafe",
-                 "fields": {"model", "state", "questions"}},  # System One accepts no routing extras
-    "ollama": {"endpoint": "http://127.0.0.1:11434/v1/systemone", "model": "nimble:9b", "name": "Ollama",
-               "key_optional": True, "explicit": True, "loopback_only": True,
-               "fields": {"model", "state", "questions"}},
-    # Any server that speaks the same request and answer shapes (references/providers.md): a self-hosted open
-    # model, a Hugging Face Inference Endpoint, or another hosted API. Configured by environment, chosen only
-    # explicitly, and its optional key is only ever sent to the configured URL's host.
-    "compatible": {"url_env": "CLASSIFIER_COMPATIBLE_URL", "key": "CLASSIFIER_COMPATIBLE_KEY",
-                   "model_env": "CLASSIFIER_COMPATIBLE_MODEL", "name": "compatible server",
-                   "key_optional": True, "explicit": True, "fields": {"model", "state", "questions"}},
-    # OpenAI's Decisions API speaks its own shape; call_jev translates to it and back (to_openai_request,
-    # from_openai_response), so callers and answer checks see the System One shape. `gpt-6-luna` is the only model and
-    # has no dated snapshot yet, so the response model id is recorded to catch drift.
-    "openai": {"endpoint": "https://api.openai.com/v1/decisions", "host": "api.openai.com", "key": "OPENAI_API_KEY",
-               "model": "gpt-6-luna", "name": "OpenAI", "explicit": True, "shape": "openai",
-               "fields": {"model", "state", "questions"}},
-}
-# Luna served by OpenRouter in the System One shape: the OpenRouter step of the route chain, so a run that moves down
-# the chain keeps one model family (thresholds and caches stay valid).
-LUNA_ON_OPENROUTER = "openai/gpt-6-luna-decisions-20261006"
-# The route chain for OpenAI work, in order. A run moves down only when a step's credit or plan is used up
-# (`Exhausted`); a step whose credential is absent is skipped. The ChatGPT sign-in step will go first once it is
-# built (context/plan-openai-provider-2026-10-08.md, Phase 3A).
-ROUTES = {"apikey": ("openai", PROVIDERS["openai"]["model"]), "openrouter": ("openrouter", LUNA_ON_OPENROUTER)}
-# Model families whose review thresholds have not been calibrated on labeled samples get a stricter review rule.
-UNCALIBRATED_FAMILIES = {"luna"}
+# Providers and models live in profiles.json next to this script (loaded below, after `fail`), plus an optional user
+# file named by CLASSIFIER_PROFILES that may only add ids starting with "user/". Provider selection that could move a
+# key stays in code: only these providers are ever chosen automatically, in this order, when their key is set.
+AUTO_PROVIDERS = ("openrouter", "typesafe")
+# The route chain for OpenAI work, in order, as model profile ids. A run moves down only when a step's credit or plan
+# is used up (`Exhausted`); a step whose credential is absent is skipped. Every step answers with Luna, so thresholds
+# and caches stay valid across a move. A ChatGPT sign-in step would go first if OpenAI documents plan use for
+# Decisions (context/plan-openai-provider-2026-10-08.md, Phase 3A).
+ROUTE_PROFILES = {"apikey": "openai/gpt-6-luna", "openrouter": "openrouter/gpt-6-luna"}
+PROFILES_FILE = Path(__file__).resolve().parent / "profiles.json"
+USER_PROFILES_MAX_BYTES = 256 * 1024
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}  # the only hosts plain http and --local-only accept
 MAX_RETRY_AFTER = 10.0  # seconds; a longer retry-after ends the call with an error instead of being waited out
 FALLBACK_OPTIONS = {"insufficient_context", "insufficient_evidence", "none_fit"}
 MAX_OPTIONS = 250  # larger option sets must be pre-filtered or split in code
-OLLAMA_MAX_QUESTIONS, OLLAMA_MAX_OPTIONS, OLLAMA_MAX_BODY_BYTES = 64, 26, 64 * 1024
-NIMBLE_MAX_TOKENS = 8_192
 RETRY_STATUSES = {429, 500, 502, 503, 504, 529}  # a classification call has no side effects, so retrying is safe
 RETRY_DELAYS = (0.5, 1.0)
 ALLOWED_FIELDS = {"model", "state", "questions", "provider", "trace", "session_id", "user"}
 RESHAPE_MAX_CHARS = 120
 RESHAPE_FIELDS = {"task", "recipe", "offloaded", "kept_for_llm", "caller"}  # local-only notes, never sent
-# jev-1.13 limits (TypeSafe models page, 2026-09-25): 64k tokens per request, 32k for state plus the longest
-# question. Tokens are estimated (4 ASCII characters each, 1.5 per other character), so a refusal near the limit
-# is approximate.
-MAX_REQUEST_TOKENS, MAX_STATE_QUESTION_TOKENS, CHARS_PER_TOKEN, NON_ASCII_TOKENS_PER_CHAR = 64_000, 32_000, 4, 1.5
+# Token limits come from profiles; tokens are estimated (4 ASCII characters each, 1.5 per other character), so a
+# refusal near a limit is approximate.
+CHARS_PER_TOKEN, NON_ASCII_TOKENS_PER_CHAR = 4, 1.5
 SECRET_KEYS = r"password|passwd|pwd|secret|client[_-]?secret|api[_-]?key|access[_-]?token|auth[_-]?token|token"
 # Secrets scrubbed from state before sending, most specific first. A value is replaced, never the text around it.
 REDACTIONS = (
@@ -91,7 +66,7 @@ REDACTIONS = (
 SECRET_KEY = re.compile(rf"(?i)(?:x-)?(?:{SECRET_KEYS})")  # an object field whose whole name is a secret key
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.9"
+CONTRACT_VERSION = "1.10"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -128,6 +103,262 @@ class Exhausted(CallError):
 
 def is_exhausted(status: int, body: str) -> bool:
     return status == 402 or (status == 429 and "insufficient_quota" in body)
+
+
+SHAPES = {"system-one", "openai"}
+PROVIDER_KEYS = {"name", "shape", "auth", "endpoint", "endpoint_env", "model_env", "host", "model", "fields",
+                 "loopback_only", "label", "limits", "text", "params"}
+PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
+PARAM_VALUE = re.compile(r"[A-Za-z0-9_-]+")  # every placeholder value, whatever its own pattern: one path segment
+USER_ID = re.compile(r"user/[a-z0-9][a-z0-9._/-]*")
+# A user provider's own credential must be named for this skill, so a profiles file cannot pick up an unrelated
+# secret (GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY) and send it to a host of its choosing.
+USER_CREDENTIAL = {"env": re.compile(r"CLASSIFIER_[A-Z0-9_]+"), "keychain": re.compile(r"classifier-[a-z0-9-]+")}
+MODEL_KEYS = {"provider", "model", "calibration", "reply_models", "match", "label", "limits"}
+LIMIT_KEYS = {"request_tokens", "state_question_tokens", "context_tokens", "questions", "options", "body_bytes"}
+TEXT_RULES = {"instructions": {"text"}, "choice": {"text", "text_or_null"}, "noul": {"text", "text_or_null"},
+              "score": {"text", "text_or_null"}}
+
+
+def _check_keys(where: str, entry: Any, allowed: set[str], required: set[str]) -> None:
+    if not isinstance(entry, dict):
+        fail(f"{where} must be an object")
+    keys = {k for k in entry if not str(k).startswith("_")}  # "_..." keys are comments
+    if keys - allowed:
+        fail(f"{where} has unknown key(s): {', '.join(sorted(keys - allowed))}")
+    if required - keys:
+        fail(f"{where} is missing: {', '.join(sorted(required - keys))}")
+
+
+def _check_limits(where: str, limits: Any) -> None:
+    _check_keys(f"{where} limits", limits, LIMIT_KEYS, set())
+    if not all(type(v) is int and v > 0 for k, v in limits.items() if not str(k).startswith("_")):
+        fail(f"{where} limits must be positive integers")
+
+
+def _check_provider(name: str, spec: dict[str, Any]) -> None:
+    where = f"profile provider {name!r}"
+    _check_keys(where, spec, PROVIDER_KEYS, {"name", "shape", "auth"})
+    if spec["shape"] not in SHAPES:
+        fail(f"{where} shape must be one of: {', '.join(sorted(SHAPES))}")
+    auth = spec["auth"]
+    _check_keys(f"{where} auth", auth, {"env", "keychain", "optional"}, {"env"})
+    if auth["env"] is None and not auth.get("optional"):
+        fail(f"{where} auth needs an env variable unless it is optional")
+    endpoint = spec.get("endpoint")
+    if endpoint is None:
+        if not spec.get("endpoint_env") or "host" in spec or spec.get("loopback_only"):
+            fail(f"{where} needs an endpoint, or an endpoint_env with no host (the host is then the URL's own)")
+    else:
+        params = spec.get("params", {})
+        if not isinstance(params, dict) or set(PLACEHOLDER.findall(endpoint)) != set(params) or any(
+                not isinstance(p, dict) or set(p) != {"env", "pattern"} for p in params.values()):
+            fail(f"{where} endpoint placeholders must match its params, each with an env and a pattern")
+        for param in params.values():
+            try:
+                re.compile(param["pattern"])
+            except (re.error, TypeError):
+                fail(f"{where} param pattern {param['pattern']!r} is not a valid regular expression")
+        parsed = urlparse(endpoint)
+        if PLACEHOLDER.search(parsed.netloc):
+            fail(f"{where} endpoint may use placeholders only in its path")
+        if spec.get("loopback_only"):
+            if parsed.scheme not in {"http", "https"} or parsed.hostname not in LOOPBACK_HOSTS or "host" in spec:
+                fail(f"{where} is loopback_only, so its endpoint must be on localhost and it takes no host")
+        elif parsed.scheme != "https" or not spec.get("host") or parsed.hostname != spec["host"]:
+            fail(f"{where} endpoint must be https on its host")
+    if "model" not in spec and "model_env" not in spec:
+        fail(f"{where} needs a default model or a model_env")
+    if "fields" in spec and not (isinstance(spec["fields"], list) and set(spec["fields"]) <= ALLOWED_FIELDS
+                                 and {"model", "state", "questions"} <= set(spec["fields"])):
+        fail(f"{where} fields must list model, state, questions and only fields from: "
+             f"{', '.join(sorted(ALLOWED_FIELDS))}")
+    if "limits" in spec:
+        _check_limits(where, spec["limits"])
+    if "text" in spec:
+        _check_keys(f"{where} text", spec["text"], set(TEXT_RULES), set())
+        if any(rule not in TEXT_RULES[kind] for kind, rule in spec["text"].items()):
+            fail(f"{where} text rules must be text or text_or_null (instructions: text)")
+
+
+def _check_model(model_id: str, spec: dict[str, Any], providers: dict[str, Any]) -> None:
+    where = f"profile model {model_id!r}"
+    _check_keys(where, spec, MODEL_KEYS, {"provider", "model", "calibration", "reply_models"})
+    if spec["provider"] not in providers:
+        fail(f"{where} names unknown provider {spec['provider']!r}")
+    if spec["calibration"] not in {"calibrated", "uncalibrated"}:
+        fail(f"{where} calibration must be calibrated or uncalibrated")
+    if not (isinstance(spec["reply_models"], list) and spec["reply_models"]
+            and all(isinstance(r, str) and r.strip() for r in spec["reply_models"])):
+        fail(f"{where} reply_models must be a non-empty list of model ids")
+    if spec.get("match", "exact") not in {"exact", "family"} or not isinstance(spec["model"], str):
+        fail(f"{where} match must be exact or family, and model a string")
+    if "limits" in spec:
+        _check_limits(where, spec["limits"])
+
+
+def _read_user_profiles(path_text: str) -> dict[str, Any]:
+    """The CLASSIFIER_PROFILES file: a regular file (a symlink must lead to one), at most 256 KiB, one JSON object."""
+    path = Path(path_text).expanduser()
+    try:
+        resolved = path.resolve(strict=True)
+        if not resolved.is_file():
+            fail(f"CLASSIFIER_PROFILES {path_text!r} is not a regular file")
+        if resolved.stat().st_size > USER_PROFILES_MAX_BYTES:
+            fail(f"CLASSIFIER_PROFILES {path_text!r} is over {USER_PROFILES_MAX_BYTES // 1024} KiB")
+        data = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        fail(f"could not read CLASSIFIER_PROFILES {path_text!r}: {exc}")
+    if not isinstance(data, dict):
+        fail("CLASSIFIER_PROFILES must hold a JSON object")
+    _check_keys("CLASSIFIER_PROFILES", data, {"providers", "models"}, set())
+    return data
+
+
+def load_profiles(user_path: str | None = None) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], set[str]]:
+    """(providers, models, default limits, user ids). Shipped profiles come from profiles.json. A user file may only
+    add ids starting with "user/"; a user provider that names a shipped credential must keep that credential's host,
+    so no profile can send a shipped key anywhere new."""
+    try:
+        shipped = json.loads(PROFILES_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        fail(f"could not read {PROFILES_FILE}: {exc}")
+    _check_keys(str(PROFILES_FILE), shipped, {"defaults", "providers", "models"}, {"defaults", "providers", "models"})
+    _check_keys(f"{PROFILES_FILE} defaults", shipped["defaults"], {"limits"}, {"limits"})
+    _check_limits(f"{PROFILES_FILE} defaults", shipped["defaults"]["limits"])
+    if not {"request_tokens", "state_question_tokens"} <= set(shipped["defaults"]["limits"]):
+        fail(f"{PROFILES_FILE} defaults need request_tokens and state_question_tokens")
+    for section in ("providers", "models"):
+        if not isinstance(shipped[section], dict):
+            fail(f"{PROFILES_FILE} {section} must be an object")
+    providers, models = dict(shipped["providers"]), dict(shipped["models"])
+    for name, spec in providers.items():
+        _check_provider(name, spec)
+    user_ids: set[str] = set()
+    if user_path:
+        user = _read_user_profiles(user_path)
+        hosts = {}  # shipped credential (env variable or Keychain item) -> the only host it may go to
+        for spec in providers.values():
+            for credential in (spec["auth"].get("env"), spec["auth"].get("keychain")):
+                if credential:
+                    hosts[credential] = spec.get("host")
+        for section, target in (("providers", providers), ("models", models)):
+            entries = user.get(section) or {}
+            if not isinstance(entries, dict):
+                fail(f"CLASSIFIER_PROFILES {section} must be an object")
+            for entry_id, spec in entries.items():
+                if not USER_ID.fullmatch(str(entry_id)) or entry_id in target:
+                    fail(f"CLASSIFIER_PROFILES {section} id {entry_id!r} must be new, start with user/, and use "
+                         "lowercase letters, digits, and . _ / -")
+                target[entry_id] = spec
+                user_ids.add(entry_id)
+        for name in user.get("providers") or {}:
+            spec = providers[name]
+            _check_provider(name, spec)
+            for kind in ("env", "keychain"):
+                credential = spec["auth"].get(kind)
+                if not credential:
+                    continue
+                if credential in hosts:
+                    if hosts[credential] is None or spec.get("host") != hosts[credential]:
+                        fail(f"profile provider {name!r} uses the shipped credential {credential!r} off its host")
+                elif not USER_CREDENTIAL[kind].fullmatch(credential):
+                    fail(f"profile provider {name!r} credential {credential!r} must be a shipped one on its own "
+                         f"host, or a new one named {USER_CREDENTIAL[kind].pattern}")
+    seen = set()
+    for model_id, spec in models.items():
+        _check_model(model_id, spec, providers)
+        key = (spec["provider"], spec["model"], spec.get("match", "exact"))
+        if key in seen:
+            fail(f"profile model {model_id!r} repeats another profile's provider and model")
+        seen.add(key)
+    missing = sorted(set(ROUTE_PROFILES.values()) - set(models))
+    if missing:
+        fail(f"{PROFILES_FILE} is missing the route chain's model profile(s): {', '.join(missing)}")
+    limits = {k: v for k, v in shipped["defaults"]["limits"].items() if not k.startswith("_")}
+    return providers, models, limits, user_ids
+
+
+def provider_view(name: str, spec: dict[str, Any]) -> dict[str, Any]:
+    """The runtime view of a provider profile used throughout this script."""
+    view = {"name": spec["name"], "profile": spec}
+    for key in ("endpoint", "host", "model", "model_env", "label", "loopback_only"):
+        if key in spec:
+            view[key] = spec[key]
+    if spec["shape"] != "system-one":
+        view["shape"] = spec["shape"]
+    if spec["auth"].get("env"):
+        view["key"] = spec["auth"]["env"]
+    if spec["auth"].get("optional"):
+        view["key_optional"] = True
+    if name not in AUTO_PROVIDERS:
+        view["explicit"] = True
+    if "endpoint_env" in spec:
+        view["endpoint_env" if "endpoint" in spec else "url_env"] = spec["endpoint_env"]
+    if "fields" in spec:
+        view["fields"] = set(spec["fields"])
+    return view
+
+
+_PROVIDER_PROFILES, MODELS, DEFAULT_LIMITS, USER_PROFILE_IDS = load_profiles(
+    os.environ.get("CLASSIFIER_PROFILES", "").strip() or None)
+PROVIDERS = {name: provider_view(name, spec) for name, spec in _PROVIDER_PROFILES.items()}
+ROUTES = {name: (MODELS[profile_id]["provider"], MODELS[profile_id]["model"])
+          for name, profile_id in ROUTE_PROFILES.items()}
+LUNA_ON_OPENROUTER = ROUTES["openrouter"][1]
+
+
+def model_profile(provider: str, model: Any) -> tuple[str, dict[str, Any]] | None:
+    """The model profile for this provider and model: an exact match first, then a family match ("nimble" for
+    "nimble:9b"). None when the model has no profile."""
+    if not isinstance(model, str):
+        return None
+    family = model.split(":", 1)[0]
+    for wanted, match in ((model, "exact"), (family, "family")):
+        for profile_id, spec in MODELS.items():
+            if spec["provider"] == provider and spec["model"] == wanted and spec.get("match", "exact") == match:
+                return profile_id, spec
+    return None
+
+
+def note_unprofiled(provider: str, model: Any) -> None:
+    """Say so when a model has no profile: it runs on its provider's limits and gets the strict review."""
+    if model_profile(provider, model) is None:
+        print(f"classifier-skill: no profile for {provider} model {model!r}; using {provider}'s limits, and its "
+              "answers get the strict review (references/providers.md, Profiles)", file=sys.stderr)
+
+
+def limits_for(provider: str, model: Any) -> dict[str, Any]:
+    """Defaults, then the provider's limits, then the model profile's."""
+    found = model_profile(provider, model)
+    return {**DEFAULT_LIMITS, **PROVIDERS[provider]["profile"].get("limits", {}),
+            **(found[1].get("limits", {}) if found else {})}
+
+
+def is_strict(reply_model: Any, provider: str | None = None, sent_model: Any = None) -> bool:
+    """Whether answers get the stricter review. With the provider and model that were asked for, only a calibrated
+    profile whose known reply ids match the reply's model is reviewed normally; anything unknown is strict. Without
+    them (older callers), any calibrated profile's reply ids decide."""
+    def matches(spec: dict[str, Any]) -> bool:  # the id itself, or it followed by a version or variant suffix
+        return isinstance(reply_model, str) and any(
+            reply_model == r or reply_model.startswith(r) and reply_model[len(r)] in "-.:" for r in spec["reply_models"])
+    if provider is None:
+        return not any(spec["calibration"] == "calibrated" and matches(spec) for spec in MODELS.values())
+    found = model_profile(provider, sent_model)
+    return not (found and found[1]["calibration"] == "calibrated" and matches(found[1]))
+
+
+def profile_log(provider: str, model: Any) -> dict[str, Any]:
+    """Which profile definition a call used, for the call log: its id, where it came from, and a short hash."""
+    found = model_profile(provider, model)
+    ids = [provider] + ([found[0]] if found else [])
+    def bare(spec: Any) -> Any:  # comments ("_..." keys) do not change the hash
+        return {k: bare(v) for k, v in spec.items() if not str(k).startswith("_")} if isinstance(spec, dict) else spec
+    blob = json.dumps({"provider": bare(PROVIDERS[provider]["profile"]), "model": bare(found[1]) if found else None},
+                      sort_keys=True)
+    return {"profile": found[0] if found else None,
+            "profile_source": "user" if any(i in USER_PROFILE_IDS for i in ids) else "shipped",
+            "profile_hash": hashlib.sha256(blob.encode()).hexdigest()[:12]}
 
 
 def load_request(path: str) -> dict[str, Any]:
@@ -186,8 +417,8 @@ def select_provider(requested: str | None) -> str:
         if name not in PROVIDERS:
             fail(f"unknown provider {name!r}; use one of: {', '.join(PROVIDERS)}")
         return name
-    for candidate, spec in PROVIDERS.items():
-        if not spec.get("explicit") and os.environ.get(spec["key"], "").strip():
+    for candidate in AUTO_PROVIDERS:  # a fixed list in code, never the merged profiles
+        if os.environ.get(PROVIDERS[candidate]["key"], "").strip():
             return candidate
     return "openrouter"
 
@@ -241,7 +472,7 @@ class Router:
     def __init__(self, plan: dict[str, Any], endpoint: str | None, timeout: float,
                  model_for: Any = lambda provider, default: default):
         self.plan, self.timeout, self.model_for = plan, timeout, model_for
-        self.index, self.moves = 0, []
+        self.index, self.moves, self.sent_model = 0, [], None
         self.endpoint = endpoint  # an explicit --endpoint applies to a single-step plan only
         if endpoint and len(plan["steps"]) > 1:
             fail("--endpoint needs --provider when the route chain is in use")
@@ -263,6 +494,7 @@ class Router:
     def send(self, payload: dict[str, Any]) -> dict[str, Any]:
         while True:
             request = {**payload, "model": self.model(payload["model"])}
+            self.sent_model = request["model"]
             try:
                 return call_jev(request, self.current_endpoint(), self.timeout, self.provider)
             except Exhausted as exc:
@@ -274,11 +506,16 @@ class Router:
                 print(f"classifier-skill: {PROVIDERS[moved_from]['name']} credit or plan is used up; moving to "
                       f"{PROVIDERS[self.provider]['name']}: {exc.message}", file=sys.stderr)
 
-    def log_fields(self) -> dict[str, Any]:
+    def strict(self, reply_model: Any) -> bool:
+        """The review rule for an answer to the request just sent, from the profile that was asked for."""
+        return is_strict(reply_model, self.provider, self.sent_model)
+
+    def log_fields(self, default_model: Any = None) -> dict[str, Any]:
+        model = self.sent_model or self.model(default_model)
         return {"host": self.plan["host"], "host_reason": self.plan["host_reason"], "route": self.plan["route"],
                 "provider_final": self.provider, "credential": "api_key" if PROVIDERS[self.provider].get("key")
                 and os.environ.get(PROVIDERS[self.provider]["key"], "").strip() else "none",
-                **({"moves": self.moves} if self.moves else {})}
+                **profile_log(self.provider, model), **({"moves": self.moves} if self.moves else {})}
 
 
 def redact(value: Any) -> tuple[Any, int]:
@@ -312,55 +549,57 @@ def estimated_tokens(value: Any) -> int:
     return math.ceil(ascii_chars / CHARS_PER_TOKEN + (len(text) - ascii_chars) * NON_ASCII_TOKENS_PER_CHAR)
 
 
-def check_size(payload: dict[str, Any], where: str = "request") -> None:
-    """Refuse, before sending, a request over jev-1.13's context limits. Sizes the payload as it will be sent."""
+def check_size(payload: dict[str, Any], where: str = "request", provider: str | None = None) -> None:
+    """Refuse, before sending, a request over the model's token limits (its profile's, else the defaults). Sizes the
+    payload as it will be sent."""
+    limits = limits_for(provider, payload.get("model")) if provider else DEFAULT_LIMITS
     near = max(estimated_tokens({"state": payload["state"], "question": {qid: q}})
                for qid, q in payload["questions"].items())
     total = estimated_tokens(payload)
-    if near > MAX_STATE_QUESTION_TOKENS or total > MAX_REQUEST_TOKENS:
+    if near > limits["state_question_tokens"] or total > limits["request_tokens"]:
         fail(f"{where} is about {near:,} tokens of state plus its longest question and {total:,} in all; the limits "
-             f"are {MAX_STATE_QUESTION_TOKENS:,} and {MAX_REQUEST_TOKENS:,}. Trim state or split the questions")
+             f"are {limits['state_question_tokens']:,} and {limits['request_tokens']:,}. Trim state or split the "
+             "questions")
+
+
+TEXT_ALLOWED = {"text": "strings", "text_or_null": "strings or null"}
 
 
 def check_provider_limits(payload: dict[str, Any], provider: str, where: str = "request") -> None:
-    """Refuse requests that exceed a provider's documented limits before any data is sent."""
-    if provider == "openai":
-        for question_id, question in payload["questions"].items():
-            criteria = question.get("criteria")
-            descriptions = (criteria.values() if isinstance(criteria, dict) else criteria) or []
-            if not isinstance(question["instructions"], str) or not all(
-                    d is None or isinstance(d, str) for d in descriptions):
-                fail(f"{where} question {question_id!r} has structured instructions or descriptions; OpenAI "
-                     "Decisions takes only text, so rewrite them as strings")
-        return
-    if provider != "ollama":
-        return
+    """Refuse requests that exceed a provider's or model's profile limits before any data is sent: question and
+    option counts, text-only instructions or descriptions, then (with state) body bytes and the context window."""
+    spec = PROVIDERS[provider]
+    label = spec.get("label", spec["name"])
+    limits = limits_for(provider, payload.get("model"))
+    rules = spec["profile"].get("text", {})
     questions = payload["questions"]
-    if len(questions) > OLLAMA_MAX_QUESTIONS:
-        fail(f"{where} has {len(questions)} questions; Ollama System One allows {OLLAMA_MAX_QUESTIONS}")
+    if "questions" in limits and len(questions) > limits["questions"]:
+        fail(f"{where} has {len(questions)} questions; {label} allows {limits['questions']}")
     for question_id, question in questions.items():
-        if question["type"] in {"choice", "score"} and len(question["criteria"]) > OLLAMA_MAX_OPTIONS:
-            fail(f"{where} question {question_id!r} has {len(question['criteria'])} options; "
-                 f"Ollama System One allows {OLLAMA_MAX_OPTIONS}")
-        if question["type"] == "choice" and not all(
-                description is None or isinstance(description, str)
-                for description in question["criteria"].values()):
-            fail(f"{where} question {question_id!r} has structured choice descriptions; "
-                 "Ollama System One allows only strings or null")
-        if question["type"] == "noul" and question.get("criteria") is not None and not all(
-                isinstance(description, str) for description in question["criteria"].values()):
-            fail(f"{where} question {question_id!r} has structured noul descriptions; "
-                 "Ollama System One allows only strings")
+        kind, criteria = question["type"], question.get("criteria")
+        if kind in {"choice", "score"} and "options" in limits and len(criteria) > limits["options"]:
+            fail(f"{where} question {question_id!r} has {len(criteria)} options; {label} allows {limits['options']}")
+        if rules.get("instructions") and not isinstance(question["instructions"], str):
+            fail(f"{where} question {question_id!r} has structured instructions; {label} takes only text, so "
+                 "rewrite them as strings")
+        rule = rules.get(kind)
+        if rule and criteria is not None:
+            values = criteria.values() if isinstance(criteria, dict) else criteria
+            if not all(isinstance(v, str) or (v is None and rule == "text_or_null") for v in values):
+                fail(f"{where} question {question_id!r} has structured {kind} descriptions; {label} allows only "
+                     f"{TEXT_ALLOWED[rule]}")
     if "state" not in payload:
         return
     body_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))  # exactly as call_jev sends it
-    if body_bytes > OLLAMA_MAX_BODY_BYTES:
-        fail(f"{where} is {body_bytes:,} bytes; Ollama System One allows {OLLAMA_MAX_BODY_BYTES:,}. "
+    if "body_bytes" in limits and body_bytes > limits["body_bytes"]:
+        fail(f"{where} is {body_bytes:,} bytes; {label} allows {limits['body_bytes']:,}. "
              "Trim state or split the questions")
-    if payload.get("model", "").split(":", 1)[0] == "nimble":
+    if "context_tokens" in limits:
         total = estimated_tokens(payload)
-        if total > NIMBLE_MAX_TOKENS:
-            fail(f"{where} is about {total:,} tokens; Nimble's context limit is {NIMBLE_MAX_TOKENS:,}. "
+        if total > limits["context_tokens"]:
+            found = model_profile(provider, payload.get("model"))
+            name = (found[1].get("label") if found else None) or payload.get("model")
+            fail(f"{where} is about {total:,} tokens; {name}'s context limit is {limits['context_tokens']:,}. "
                  "Trim state or split the questions")
 
 
@@ -409,8 +648,8 @@ def provider_endpoint(provider: str) -> str:
     """The provider's default endpoint; the compatible provider's comes from its environment variable."""
     spec = PROVIDERS[provider]
     if "url_env" not in spec:
-        override = os.environ.get("OPENROUTER_DECISIONS_URL") if provider == "openrouter" else None
-        return override or spec["endpoint"]
+        override = os.environ.get(spec["endpoint_env"]) if "endpoint_env" in spec else None
+        return override or fill_params(provider, spec["endpoint"])
     url = os.environ.get(spec["url_env"], "").strip()
     if not url:
         fail(f"{spec['url_env']} is not set; provider {provider} needs the server's full request URL", code=1)
@@ -430,6 +669,18 @@ def check_endpoint(provider: str, endpoint: str) -> None:
     if parsed.hostname != host or not (parsed.scheme == "https" or local_http):
         allowed = f"https://{host}" + (" (or http on localhost)" if "url_env" in spec else "")
         fail(f"refusing to send credentials to {endpoint!r}; {provider} only allows {allowed}", code=1)
+
+
+def fill_params(provider: str, endpoint: str) -> str:
+    """Fill path placeholders such as {account_id} from their environment variables. Each value must match its
+    pattern in full, so a value cannot add path segments, a query, or a host."""
+    for name, param in PROVIDERS[provider]["profile"].get("params", {}).items():
+        value = os.environ.get(param["env"], "")
+        if not re.fullmatch(param["pattern"], value) or not PARAM_VALUE.fullmatch(value):
+            fail(f"{param['env']} must be set to a value matching {param['pattern']} (letters, digits, _ and - "
+                 f"only) for provider {provider}", code=1)
+        endpoint = endpoint.replace("{" + name + "}", value)
+    return endpoint
 
 
 def is_local(endpoint: str) -> bool:
@@ -640,15 +891,12 @@ def response_cost(response: Any) -> float:
         return 0.0
 
 
-def model_family(model: Any) -> str:
-    text = str(model or "").lower()
-    return "luna" if "luna" in text else "jev" if "jev" in text else "other"
-
-
-def review_flags(answers: dict[str, Any], margin: float, model: Any = None) -> dict[str, list[str]]:
-    """Deterministic reasons to route an answer to a human; see the module docstring. A model family that has not
-    been calibrated (UNCALIBRATED_FAMILIES) gets a wider margin, a wider noul band, and a higher score bar."""
-    strict = model_family(model) in UNCALIBRATED_FAMILIES
+def review_flags(answers: dict[str, Any], margin: float, model: Any = None,
+                 strict: bool | None = None) -> dict[str, list[str]]:
+    """Deterministic reasons to route an answer to a human; see the module docstring. A model whose profile is not
+    calibrated, or that has no profile, gets a wider margin, a wider noul band, and a higher score bar. `strict`
+    comes from the profile that was asked for (Router.strict); without it, the reply's model id decides."""
+    strict = is_strict(model) if strict is None else strict
     margin, noul_band, score_bar = (margin + 0.1, 0.3, 0.6) if strict else (margin, 0.35, 0.5)
     flags: dict[str, list[str]] = {}
     for question_id, answer in (answers or {}).items():
@@ -793,9 +1041,10 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
             state, n = redact(state)
             redacted += n
         item_payload = {**template, "state": state}
-        check_size(item_payload, f"batch line {number}")
-        for provider, _ in args.router.plan["steps"]:
-            check_provider_limits(item_payload, provider, f"batch line {number}")
+        for provider, pinned in args.router.plan["steps"]:
+            step_payload = {**item_payload, "model": pinned or item_payload["model"]}
+            check_size(step_payload, f"batch line {number}", provider)
+            check_provider_limits(step_payload, provider, f"batch line {number}")
         states.append((number, state))
     if not states:
         fail("batch file has no states")
@@ -826,7 +1075,8 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
                           "model": response.get("model") if isinstance(response, dict) else None}
             else:
                 models.add(response.get("model"))
-                review = review_flags(response.get("answers"), args.margin, response.get("model"))
+                review = review_flags(response.get("answers"), args.margin, response.get("model"),
+                                      args.router.strict(response.get("model")))
                 flagged += bool(review)
                 for question_id in review:
                     flags_by_question[question_id] = flags_by_question.get(question_id, 0) + 1
@@ -912,9 +1162,12 @@ def main() -> None:
             if redacted:
                 print(f"classifier-skill: redacted {redacted} secret value(s) from state before sending",
                       file=sys.stderr)
-        check_size(payload)
-    for provider, _ in plan["steps"]:
-        check_provider_limits(payload, provider)
+    for provider, pinned in plan["steps"]:
+        step_payload = {**payload, "model": pinned or payload["model"]}
+        note_unprofiled(provider, step_payload["model"])
+        if "state" in payload:
+            check_size(step_payload, provider=provider)
+        check_provider_limits(step_payload, provider)
     accepted = set.intersection(*(set(PROVIDERS[p].get("fields", ALLOWED_FIELDS)) for p, _ in plan["steps"]))
     extras = sorted(set(payload) - accepted)
     if extras:
@@ -937,7 +1190,8 @@ def main() -> None:
             fail(exc.message, code=1)
         args.provider, args.route_log = args.router.provider, args.router.log_fields()
         errors = response_errors(result, payload["questions"])
-        review = {} if errors else review_flags(result.get("answers"), args.margin, result.get("model"))
+        review = {} if errors else review_flags(result.get("answers"), args.margin, result.get("model"),
+                                                args.router.strict(result.get("model")))
         log_call(args, note, payload, {
             "mode": "single", "items": 1, "flagged": int(bool(review)), "invalid": int(bool(errors)),
             "redacted": redacted,
