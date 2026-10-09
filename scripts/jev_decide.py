@@ -91,7 +91,7 @@ REDACTIONS = (
 SECRET_KEY = re.compile(rf"(?i)(?:x-)?(?:{SECRET_KEYS})")  # an object field whose whole name is a secret key
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.8"
+CONTRACT_VERSION = "1.9"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

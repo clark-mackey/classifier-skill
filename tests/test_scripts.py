@@ -1082,7 +1082,7 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([l["id"] for l in lines], [i["term"] for i in self.ITEMS])
         self.assertTrue(all(l["versions"] == {"sheet": "test-terms@2", "recipe": None, "model": "typesafe/jev-1.13",
-                                              "contract": "1.8", "context": "02f189c76132"} for l in lines))
+                                              "contract": "1.9", "context": "02f189c76132"} for l in lines))
         self.assertEqual((summary["complete"], summary["items_in"], summary["items_out"], summary["answered"]),
                          (True, 4, 4, 4))
         self.assertIn("Classifier: 4/0/0 (none)", err)
@@ -1201,7 +1201,7 @@ class ItemsEngine(unittest.TestCase):
 
     def test_contract_version(self):
         result = run("classify_items.py", "--contract-version")
-        self.assertEqual(result.stdout.strip(), "1.8")
+        self.assertEqual(result.stdout.strip(), "1.9")
 
     def test_context_file_replaces_sheet_context(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1889,7 +1889,7 @@ class OpenAIRoute(unittest.TestCase):
                 raise reply
             return Response(reply)
 
-        sheet = {"sheet": "t", "version": 1, "contract": "1.8", "data": "cloud_ok", "min_items": 1,
+        sheet = {"sheet": "t", "version": 1, "contract": "1.9", "data": "cloud_ok", "min_items": 1,
                  "model": "typesafe/jev-1.13",  # a pin must not put Jev on the chain's OpenRouter step
                  "fields": {"card": ["text"]}, "questions": self.QUESTIONS}
         dated = {**self.OPENAI_REPLY, "model": "gpt-6-luna-2026-10-01"}

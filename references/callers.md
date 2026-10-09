@@ -1,6 +1,6 @@
 # Calling the classifier from another skill
 
-Contract version **1.8**. This is the interface other skills may rely on; anything not listed here can change without notice. Tests in `tests/test_scripts.py` (`CallerContract`) pin every guarantee below.
+Contract version **1.9**. This is the interface other skills may rely on; anything not listed here can change without notice. Tests in `tests/test_scripts.py` (`CallerContract`) pin every guarantee below.
 
 ## Find the script
 
@@ -14,7 +14,7 @@ None found: skip your classifier step and say so.
 
 ## Check the version
 
-`python3 <script> --contract-version` prints the version (`1.8`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions only add.
+`python3 <script> --contract-version` prints the version (`1.9`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions only add.
 
 ## Call
 
@@ -63,7 +63,7 @@ python3 <classify_items.py> --sheet SHEET.json --items ITEMS.jsonl --out OUT.jso
 | Field | Required | Meaning |
 |---|---|---|
 | `sheet`, `version` | yes | name (lowercase, digits, hyphens) and integer version; a new version for any change to questions, fields, or recipe |
-| `contract` | yes | the contract you wrote for, e.g. `"1.8"`; a different major exits 2 |
+| `contract` | yes | the contract you wrote for, e.g. `"1.9"`; a different major exits 2 |
 | `data` | yes | `cloud_ok`, or `local_only` (then only a server on this machine is used) |
 | `fields` | yes | `{"id": <item field>, "card": [<item fields sent>]}`; only card fields are sent; `id` defaults to `id` |
 | `questions` and/or `recipe` | one of | questions as in SKILL.md, each with an optional `threshold` (0.5–1, default 0.8); `recipe` names a generic set in `recipes/<name>@<N>.json`, and sheet questions override recipe questions by id |
@@ -104,6 +104,7 @@ A calling skill may replace this skill's workflow for its own purpose: the Resha
 
 ## Changelog
 
+- **1.9** (2026-10-08): a response with a missing, blank, or non-string `model` is invalid (exit 3 single, `invalid` line in batch, `invalid_answer` in `classify_items.py`); the requested model is never substituted. Reported usage and cost now count for invalid answers too. `score_labels.py` exits 2 on a duplicate label or prediction id. Tightens, not only adds: a caller that relied on model-less answers passing must handle them as invalid.
 - **1.8** (2026-10-08): `openai` provider (OpenAI Decisions, GPT-6 Luna), translated to and from the System One shapes; a `{"type": "refusal"}` answer is valid and always flagged for review. Inside Codex (`CODEX_THREAD_ID` without `CLAUDECODE`, or `CLASSIFIER_HOST=codex`) or with `CLASSIFIER_ROUTE`, the route chain replaces the default choice: OpenAI with `OPENAI_API_KEY`, then Luna on OpenRouter, moving only when credit runs out; Jev is never used there unless named. New reason `exhausted`; `classify_items.py` stamps each answered line with the model the provider reported, ignores a sheet `model` pin on the chain, and reports `route` and `route_moves`; dry runs need no key on the chain. Luna answers get a stricter review rule until calibrated. The call log records host, route, and moves.
 
 - **1.7** (2026-10-04): loopback calls ignore `HTTP(S)_PROXY`; any non-empty value under a secret-named key is redacted, not only strings; a non-string `model` or `choice`, or a `score` more than 0.05 from its probabilities' expected level, is invalid (exit 3) instead of crashing; `reshape` fields are cut at 120 characters and the call log is created mode 0600; the batch summary's `answered` excludes invalid lines; `classify_items.py` dry runs show payloads below `min_items`, and a non-string sheet `recipe` exits 2.
