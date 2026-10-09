@@ -14,7 +14,7 @@ None found: skip your classifier step and say so.
 
 ## Check the version
 
-`python3 <script> --contract-version` prints the version (`1.9`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions only add.
+`python3 <script> --contract-version` prints the version (`1.9`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions add features or tighten validation of malformed provider answers; any tightening is named in the changelog.
 
 ## Call
 
