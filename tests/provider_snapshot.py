@@ -15,7 +15,7 @@ FIXTURE = ROOT / "tests/fixtures/provider_snapshot.json"
 KEYS = ("OPENROUTER_API_KEY", "TYPESAFE_API_KEY", "OPENAI_API_KEY", "CLASSIFIER_COMPATIBLE_KEY")
 CLEAN = {"CLASSIFIER_HOST": "other", "CLASSIFIER_ROUTE": "", "CLASSIFIER_PROVIDER": "", "CLASSIFIER_PROFILES": "",
          "OPENROUTER_DECISIONS_URL": "", "CLASSIFIER_COMPATIBLE_URL": "", "CLASSIFIER_COMPATIBLE_MODEL": "",
-         "CODEX_THREAD_ID": "", **{k: "" for k in KEYS}}
+         "CODEX_THREAD_ID": "", "CLOUDFLARE_ACCOUNT_ID": "", "CLOUDFLARE_AUTH_TOKEN": "", **{k: "" for k in KEYS}}
 URLS = ["https://openrouter.ai/api/alpha/decisions", "https://api.typesafe.ai/v1/systemone",
         "https://api.openai.com/v1/decisions", "http://127.0.0.1:11434/v1/systemone", "https://localhost:9/x",
         "http://localhost:8080/v1/systemone", "https://models.example.com/v1/systemone", "http://openrouter.ai/x",
@@ -24,7 +24,7 @@ SPEC_KEYS = ("name", "key", "model", "host", "endpoint", "explicit", "key_option
              "url_env", "model_env")
 MODELS = [("openrouter", "typesafe/jev-1.13"), ("openrouter", "openai/gpt-6-luna-decisions-20261006"),
           ("typesafe", "jev-1.13.0"), ("openai", "gpt-6-luna"), ("ollama", "nimble:9b"), ("ollama", "nimble:4b"),
-          ("ollama", "tev1:4b"), ("compatible", "Winnow-12B")]
+          ("ollama", "tev1:4b"), ("compatible", "Winnow-12B"), ("cloudflare", "clef"), ("cloudflare", "clef-flash")]
 
 
 def load():
@@ -100,7 +100,8 @@ def snapshot() -> dict:
             entry = {key: spec.get(key) for key in SPEC_KEYS}
             entry["fields"] = sorted(spec["fields"]) if spec.get("fields") is not None else None
             env = {"CLASSIFIER_COMPATIBLE_URL": "https://models.example.com/v1/systemone",
-                   "OPENROUTER_DECISIONS_URL": "https://openrouter.ai/api/v2/decisions"}
+                   "OPENROUTER_DECISIONS_URL": "https://openrouter.ai/api/v2/decisions",
+                   "CLOUDFLARE_ACCOUNT_ID": "0123456789abcdef0123456789abcdef"}
             with mock.patch.dict(os.environ, env):
                 entry["endpoint_with_env"] = module.provider_endpoint(name)
                 entry["accepts"] = {url: refused(lambda: module.check_endpoint(name, url)) is None for url in URLS}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Judge a list of items with a question sheet: items JSONL in, one stamped line per item out, plus a summary.
 
-This is the engine behind the sheet procedure (references/sheets.md) and contract 1.11 (references/callers.md). A caller supplies
+This is the engine behind the sheet procedure (references/sheets.md) and contract 1.12 (references/callers.md). A caller supplies
 data only: a sheet (questions, which item fields go on each card, thresholds, data rule) and the items. Everything else
 stays in here: cards, redaction, size limits, provider choice, retries, answer validation, and dispositions.
 
@@ -193,7 +193,7 @@ def sheet_model(sheet: dict[str, Any], provider: str) -> str | None:
 def call_reason(exc: jev.CallError) -> str:
     if isinstance(exc, jev.Exhausted):
         return "exhausted"
-    status = getattr(exc.__cause__, "code", None)
+    status = getattr(exc.__cause__, "code", None) or exc.status
     if status == 413:
         return "too_large"
     if status in AUTH_STATUSES:
@@ -375,7 +375,8 @@ def main() -> None:
         "human_by_question": counts["human"], "skip_by_question": counts["skip"],
         "unanswered": counts["unanswered"], "bypass": bypass, "degraded": bool(failed),
         "models_reported": sorted(m for m in models if m), "redacted": redacted,
-        "cost": round(cost, 8) or None, "seconds": round(time.monotonic() - started, 2),
+        "cost": round(cost, 8) or None, "cost_estimated": round(args.router.cost_estimated, 8) or None,
+        "seconds": round(time.monotonic() - started, 2),
     }
     partial.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     partial.replace(summary_path)  # the summary appears whole or not at all

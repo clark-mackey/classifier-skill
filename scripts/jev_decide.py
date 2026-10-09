@@ -66,7 +66,7 @@ REDACTIONS = (
 SECRET_KEY = re.compile(rf"(?i)(?:x-)?(?:{SECRET_KEYS})")  # an object field whose whole name is a secret key
 # The interface other skills may rely on, documented in references/callers.md. Bump the major version on any
 # change that could break a caller; callers skip their classifier step when the major version differs.
-CONTRACT_VERSION = "1.11"
+CONTRACT_VERSION = "1.12"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -102,10 +102,15 @@ class Exhausted(CallError):
 
 
 def is_exhausted(status: int, body: str) -> bool:
-    return status == 402 or (status == 429 and "insufficient_quota" in body)
+    """Credit or allowance used up: OpenRouter 402, OpenAI `insufficient_quota`, Cloudflare Workers AI error 3036
+    (the account's daily free allocation is spent)."""
+    return status == 402 or (status == 429 and ("insufficient_quota" in body
+                                                or re.search(r'"code"\s*:\s*3036\b', body) is not None))
 
 
-SHAPES = {"system-one", "openai"}
+# system-one+envelope: the System One body inside Cloudflare's {"result", "success", "errors", "messages"}.
+SHAPES = {"system-one", "system-one+envelope", "openai"}
+MODEL_PLACEHOLDER = "model"  # an endpoint's {model} is filled from each request's model, not from params
 PROVIDER_KEYS = {"name", "shape", "auth", "endpoint", "endpoint_env", "model_env", "host", "model", "fields",
                  "loopback_only", "label", "limits", "text", "params"}
 PLACEHOLDER = re.compile(r"\{([a-z_]+)\}")
@@ -114,7 +119,7 @@ USER_ID = re.compile(r"user/[a-z0-9][a-z0-9._/-]*")
 # A user provider's own credential must be named for this skill, so a profiles file cannot pick up an unrelated
 # secret (GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY) and send it to a host of its choosing.
 USER_CREDENTIAL = {"env": re.compile(r"CLASSIFIER_[A-Z0-9_]+"), "keychain": re.compile(r"classifier-[a-z0-9-]+")}
-MODEL_KEYS = {"provider", "model", "calibration", "reply_models", "match", "label", "limits"}
+MODEL_KEYS = {"provider", "model", "calibration", "reply_models", "match", "label", "limits", "price"}
 LIMIT_KEYS = {"request_tokens", "state_question_tokens", "context_tokens", "questions", "options", "body_bytes"}
 TEXT_RULES = {"instructions": {"text"}, "choice": {"text", "text_or_null"}, "noul": {"text", "text_or_null"},
               "score": {"text", "text_or_null"}}
@@ -151,9 +156,11 @@ def _check_provider(name: str, spec: dict[str, Any]) -> None:
             fail(f"{where} needs an endpoint, or an endpoint_env with no host (the host is then the URL's own)")
     else:
         params = spec.get("params", {})
-        if not isinstance(params, dict) or set(PLACEHOLDER.findall(endpoint)) != set(params) or any(
-                not isinstance(p, dict) or set(p) != {"env", "pattern"} for p in params.values()):
-            fail(f"{where} endpoint placeholders must match its params, each with an env and a pattern")
+        if not isinstance(params, dict) or set(PLACEHOLDER.findall(endpoint)) - {MODEL_PLACEHOLDER} != set(params) \
+                or MODEL_PLACEHOLDER in params \
+                or any(not isinstance(p, dict) or set(p) != {"env", "pattern"} for p in params.values()):
+            fail(f"{where} endpoint placeholders must match its params, each with an env and a pattern "
+                 f"({{{MODEL_PLACEHOLDER}}} is filled from the request's model and is not a param)")
         for param in params.values():
             try:
                 re.compile(param["pattern"])
@@ -195,6 +202,9 @@ def _check_model(model_id: str, spec: dict[str, Any], providers: dict[str, Any])
         fail(f"{where} match must be exact or family, and model a string")
     if "limits" in spec:
         _check_limits(where, spec["limits"])
+    price = spec.get("price")
+    if price is not None and not (type(price) in (int, float) and math.isfinite(price) and price >= 0):
+        fail(f"{where} price must be dollars per million input tokens, or null when unpublished")
 
 
 def _read_user_profiles(path_text: str) -> dict[str, Any]:
@@ -477,9 +487,14 @@ class Router:
                  model_for: Any = lambda provider, default: default):
         self.plan, self.timeout, self.model_for = plan, timeout, model_for
         self.index, self.moves, self.sent_model = 0, [], None
+        self.cost_estimated = 0.0  # from profile prices, for providers that report tokens but no cost
         self.endpoint = endpoint  # an explicit --endpoint applies to a single-step plan only
         if endpoint and len(plan["steps"]) > 1:
             fail("--endpoint needs --provider when the route chain is in use")
+        placeholder = "{" + MODEL_PLACEHOLDER + "}"
+        if endpoint and placeholder in PROVIDERS[self.provider]["endpoint"] and placeholder not in endpoint:
+            print(f"classifier-skill: --endpoint has no {placeholder}, so every request goes to that URL whatever "
+                  "--model says", file=sys.stderr)
 
     @property
     def provider(self) -> str:
@@ -500,7 +515,9 @@ class Router:
             request = {**payload, "model": self.model(payload["model"])}
             self.sent_model = request["model"]
             try:
-                return call_jev(request, self.current_endpoint(), self.timeout, self.provider)
+                response = call_jev(request, self.current_endpoint(), self.timeout, self.provider)
+                self.cost_estimated += estimated_cost(self.provider, request["model"], response)
+                return response
             except Exhausted as exc:
                 if self.index + 1 >= len(self.plan["steps"]):
                     raise
@@ -519,7 +536,8 @@ class Router:
         return {"host": self.plan["host"], "host_reason": self.plan["host_reason"], "route": self.plan["route"],
                 "provider_final": self.provider, "credential": "api_key" if PROVIDERS[self.provider].get("key")
                 and os.environ.get(PROVIDERS[self.provider]["key"], "").strip() else "none",
-                **profile_log(self.provider, model), **({"moves": self.moves} if self.moves else {})}
+                **profile_log(self.provider, model), **({"moves": self.moves} if self.moves else {}),
+                "cost_estimated": round(self.cost_estimated, 8) or None}
 
 
 def redact(value: Any) -> tuple[Any, int]:
@@ -695,6 +713,16 @@ def fill_params(provider: str, endpoint: str) -> str:
     return endpoint
 
 
+def fill_model(endpoint: str, model: Any) -> str:
+    """Fill an endpoint's {model} from the request's model; the model must be one path segment."""
+    placeholder = "{" + MODEL_PLACEHOLDER + "}"
+    if placeholder not in endpoint:
+        return endpoint
+    if not isinstance(model, str) or not PARAM_VALUE.fullmatch(model):
+        raise CallError(f"model {model!r} cannot go in this provider's URL (letters, digits, _ and - only)")
+    return endpoint.replace(placeholder, model)
+
+
 def is_local(endpoint: str) -> bool:
     return urlparse(endpoint).hostname in LOOPBACK_HOSTS
 
@@ -766,9 +794,11 @@ def from_openai_response(raw: Any, requested_model: str, questions: dict[str, An
 
 def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: str = "openrouter") -> dict[str, Any]:
     spec = PROVIDERS[provider]
-    openai_shape = spec.get("shape") == "openai"
+    shape = spec.get("shape", "system-one")
+    openai_shape = shape == "openai"
     body = to_openai_request(payload) if openai_shape else payload
     check_endpoint(provider, endpoint)
+    endpoint = fill_model(endpoint, payload.get("model"))
     key_env = spec.get("key")
     api_key = os.environ.get(key_env, "").strip() if key_env else ""
     if not api_key and not spec.get("key_optional"):
@@ -790,6 +820,8 @@ def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: s
             opener = LOCAL_OPENER.open if is_local(endpoint) else urllib.request.urlopen
             with opener(request, timeout=timeout) as response:
                 result = json.load(response)
+                if shape == "system-one+envelope":
+                    return unwrap_envelope(result, service)
                 return from_openai_response(result, payload["model"], payload["questions"]) if openai_shape else result
         except urllib.error.HTTPError as exc:
             asked = retry_after(exc)
@@ -805,7 +837,8 @@ def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: s
             exc.close()
             wait = f" (asked to retry after {asked:.0f}s, longer than the {MAX_RETRY_AFTER:.0f}s this script waits)" \
                 if asked is not None and asked > MAX_RETRY_AFTER and exc.code in RETRY_STATUSES else ""
-            raise CallError(f"{service} returned HTTP {exc.code}{wait}: {body}", exc.code) from exc
+            raise CallError(f"{service} returned HTTP {exc.code}{wait}: {body}{auth_hint(provider, exc.code)}",
+                            exc.code) from exc
         except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
             if retry:
                 time.sleep(RETRY_DELAYS[attempt])
@@ -814,6 +847,27 @@ def call_jev(payload: dict[str, Any], endpoint: str, timeout: float, provider: s
         except ValueError as exc:  # JSONDecodeError, or bytes that are not valid text at all
             raise CallError(f"{service} returned non-JSON: {exc}") from exc
     raise AssertionError("unreachable")
+
+
+def unwrap_envelope(raw: Any, service: str) -> Any:
+    """The System One body from a {"result", "success", "errors"} envelope; a reply without success is an error,
+    never an answer."""
+    if isinstance(raw, dict) and raw.get("success") is True and isinstance(raw.get("result"), dict):
+        return raw["result"]
+    errors = raw.get("errors") if isinstance(raw, dict) else None
+    # Labelled bad_request, like the HTTP 400 Cloudflare usually sends; an items run stops on it as on any other 400.
+    raise CallError(f"{service} returned no result: {json.dumps(errors, ensure_ascii=False)[:500]}", 400)
+
+
+def auth_hint(provider: str, status: int) -> str:
+    """For 401/403 from a provider whose URL carries an account (or similar) id: a wrong id fails the same way as a
+    wrong token, so name both."""
+    params = PROVIDERS[provider]["profile"].get("params", {})
+    key = PROVIDERS[provider].get("key")
+    if status not in {401, 403} or not params or not key:
+        return ""
+    names = " and ".join(p["env"] for p in params.values())
+    return f" (check that {key} is valid for this service and that {names} is that token's own)"
 
 
 def retry_after(exc: urllib.error.HTTPError) -> float | None:
@@ -901,6 +955,17 @@ def response_cost(response: Any) -> float:
         return cost if math.isfinite(cost) and cost >= 0 else 0.0
     except (TypeError, ValueError, OverflowError):
         return 0.0
+
+
+def estimated_cost(provider: str, model: Any, response: Any) -> float:
+    """Dollars from the model profile's price and the reported input tokens, for a reply that reports tokens but no
+    cost; 0 when the reply reports a cost, or the profile has no price."""
+    usage = response.get("usage") if isinstance(response, dict) else None
+    found = model_profile(provider, model)
+    price = found[1].get("price") if found else None
+    if price is None or not isinstance(usage, dict) or usage.get("cost") is not None:
+        return 0.0
+    return usage_tokens(response) * price / 1_000_000
 
 
 def review_flags(answers: dict[str, Any], margin: float, model: Any = None,
@@ -1019,7 +1084,7 @@ def failure_kind(exc: CallError) -> str:
     """A short, content-free label for the call log: "exhausted", the HTTP status, or "transport"."""
     if isinstance(exc, Exhausted):
         return "exhausted"
-    status = getattr(exc.__cause__, "code", None)
+    status = getattr(exc.__cause__, "code", None) or exc.status
     return f"http_{status}" if isinstance(status, int) else "transport"
 
 
@@ -1100,7 +1165,10 @@ def run_batch(template: dict[str, Any], batch_path: str, args: argparse.Namespac
         done += 1
     if not args.dry_run:
         args.provider, args.route_log = args.router.provider, args.router.log_fields()
-        cost = f"cost ${total_cost:.6f}" if total_cost else "cost not reported by provider"
+        estimate = args.router.cost_estimated
+        parts = ([f"cost ${total_cost:.6f}"] if total_cost else []) + \
+            ([f"estimated ${estimate:.6f} from the profile price"] if estimate else [])
+        cost = ", ".join(parts) or "cost not reported by provider"
         print(f"classifier-skill: {len(states)} states, {done - invalid} answered, {flagged} flagged for review, "
               f"{invalid} invalid, {cost}", file=sys.stderr)
         if stopped:
@@ -1248,6 +1316,7 @@ def run_probe(args: argparse.Namespace) -> None:
         largest = size
     report["calls"] = results
     report["cost"] = round(total_cost, 8)
+    report["cost_estimated"] = round(router.cost_estimated, 8) or None
     if args.options:
         report["largest_options_ok"] = largest
     report["suggested_patch"] = probe_patch(provider, model, profile_id, reply_model,

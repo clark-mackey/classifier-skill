@@ -56,6 +56,20 @@
       "label": "OpenAI Decisions",
       "text": {"instructions": "text", "choice": "text_or_null", "noul": "text_or_null", "score": "text_or_null"},
       "_doc": "gpt-6-luna has no dated snapshot yet, so the reply's model id is recorded to catch drift."
+    },
+    "cloudflare": {
+      "name": "Cloudflare Workers AI",
+      "endpoint": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/{model}",
+      "host": "api.cloudflare.com",
+      "auth": {"env": "CLOUDFLARE_AUTH_TOKEN", "keychain": "cloudflare-auth-token"},
+      "params": {"account_id": {"env": "CLOUDFLARE_ACCOUNT_ID", "pattern": "[0-9a-f]{32}"}},
+      "shape": "system-one+envelope",
+      "model": "clef",
+      "fields": ["model", "state", "questions"],
+      "label": "Cloudflare Clef",
+      "limits": {"questions": 64, "request_tokens": 52000, "state_question_tokens": 52000,
+                 "_source": "1-64 questions and a 65,536-token context (long state is silently truncated), less a 20% margin; Cloudflare blog and Workers AI docs, 2026-10-08"},
+      "_doc": "Explicit only. Each model has its own URL path ({model}). Use a token scoped to Workers AI for this account."
     }
   },
   "models": {
@@ -79,6 +93,18 @@
       "provider": "ollama", "model": "nimble", "match": "family",
       "reply_models": ["nimble"], "calibration": "uncalibrated",
       "label": "Nimble", "limits": {"context_tokens": 8192}
+    },
+    "cloudflare/clef": {
+      "provider": "cloudflare", "model": "clef",
+      "limits": {"options": 128, "_options_probed": "2026-10-09 with clef; 128 is the largest size --probe tries, not a known cap"},
+      "reply_models": ["clef"], "calibration": "uncalibrated", "price": 0.24,
+      "_price": "dollars per million input tokens, Cloudflare blog 2026-10-08"
+    },
+    "cloudflare/clef-flash": {
+      "provider": "cloudflare", "model": "clef-flash",
+      "limits": {"options": 128, "_options_probed": "2026-10-09 with clef-flash; 128 is the largest size --probe tries, not a known cap"},
+      "reply_models": ["clef-flash"], "calibration": "uncalibrated", "price": null,
+      "_price": "not published as of 2026-10-09"
     }
   }
 }

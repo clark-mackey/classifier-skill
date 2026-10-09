@@ -1082,7 +1082,7 @@ class ItemsEngine(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([l["id"] for l in lines], [i["term"] for i in self.ITEMS])
         self.assertTrue(all(l["versions"] == {"sheet": "test-terms@2", "recipe": None, "model": "typesafe/jev-1.13",
-                                              "contract": "1.11", "context": "02f189c76132"} for l in lines))
+                                              "contract": "1.12", "context": "02f189c76132"} for l in lines))
         self.assertEqual((summary["complete"], summary["items_in"], summary["items_out"], summary["answered"]),
                          (True, 4, 4, 4))
         self.assertIn("Classifier: 4/0/0 (none)", err)
@@ -1201,7 +1201,7 @@ class ItemsEngine(unittest.TestCase):
 
     def test_contract_version(self):
         result = run("classify_items.py", "--contract-version")
-        self.assertEqual(result.stdout.strip(), "1.11")
+        self.assertEqual(result.stdout.strip(), "1.12")
 
     def test_context_file_replaces_sheet_context(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2049,7 +2049,7 @@ class Profiles(unittest.TestCase):
         self.assertEqual(current, json.loads(provider_snapshot.FIXTURE.read_text()))
 
     def test_contract_version(self):
-        self.assertEqual(run("jev_decide.py", "--contract-version").stdout.strip(), "1.11")
+        self.assertEqual(run("jev_decide.py", "--contract-version").stdout.strip(), "1.12")
 
     def test_openrouter_url_override_stays_on_its_host(self):
         module = self.load()
@@ -2329,6 +2329,206 @@ class FakeDecisionServer:
     def close(self):
         self.httpd.shutdown()
         self.httpd.server_close()
+
+
+class Cloudflare(unittest.TestCase):
+    """Cloudflare Clef (contract 1.12): the envelope shape, {model} in the URL, the account id, error mapping, and
+    the estimated cost. Replies are mocked; the live checks are in the plan's Phase 3 notes."""
+
+    ACCOUNT = "0123456789abcdef0123456789abcdef"
+    QUESTIONS = {"said": {"type": "noul", "instructions": "Says the sky is blue?"},
+                 "clear": {"type": "score", "instructions": "How clearly?", "criteria": ["vague", "clear"]}}
+
+    @staticmethod
+    def envelope(model="clef", tokens=1000):
+        clear = {"type": "score", "score": 0.98, "legend": {"0": "vague", "1": "clear"},  # Clef's extra legend
+                 "probabilities": {"0": 0.02, "1": 0.98}, "confidence": 0.95}
+        return {"result": {"model": model, "answers": {"said": {"type": "noul", "noul": 0.99}, "clear": clear},
+                           "usage": {"input_tokens": tokens, "output_tokens": 0}},
+                "success": True, "errors": [], "messages": []}
+
+    def call(self, reply, model="clef", account=ACCOUNT, argv=()):
+        """Run jev_decide.py main() once against a mocked Cloudflare; returns (exit code, stdout, stderr, sent URLs,
+        last log record)."""
+        import urllib.error
+        module = load_module()
+        sent = []
+
+        class Response:
+            def __enter__(self):
+                return io.BytesIO(json.dumps(reply).encode())
+
+            def __exit__(self, *exc):
+                return False
+
+        def urlopen(request, timeout):
+            sent.append(request.full_url)
+            if isinstance(reply, tuple):  # (status, envelope)
+                raise urllib.error.HTTPError(request.full_url, reply[0], "error", {},
+                                             io.BytesIO(json.dumps(reply[1]).encode()))
+            return Response()
+
+        out, err, code = io.StringIO(), io.StringIO(), 0
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "calls.jsonl"
+            with mock.patch.object(module.urllib.request, "urlopen", urlopen), \
+                    mock.patch.object(module.time, "sleep"), \
+                    mock.patch.object(sys, "argv", ["jev_decide.py", "--provider", "cloudflare", "--model", model, *argv]), \
+                    mock.patch.object(sys, "stdin", io.StringIO(json.dumps({"state": "The sky is blue.",
+                                                                             "questions": self.QUESTIONS}))), \
+                    mock.patch.object(sys, "stdout", out), mock.patch.object(sys, "stderr", err), \
+                    mock.patch.dict(os.environ, {"CLOUDFLARE_AUTH_TOKEN": "test-not-a-key",
+                                                 "CLOUDFLARE_ACCOUNT_ID": account,
+                                                 "CLASSIFIER_SKILL_LOG": str(log)}):
+                try:
+                    module.main()
+                except SystemExit as exc:
+                    code = exc.code
+            record = json.loads(log.read_text().splitlines()[-1]) if log.exists() else None
+        return code, out.getvalue(), err.getvalue(), sent, record
+
+    def test_success_unwraps_the_envelope_and_estimates_cost(self):
+        code, out, _, sent, record = self.call(self.envelope(tokens=1000))
+        self.assertEqual(code, 0)
+        self.assertEqual(sent, [f"https://api.cloudflare.com/client/v4/accounts/{self.ACCOUNT}/ai/run/@cf/cloudflare/clef"])
+        self.assertEqual(json.loads(out)["answers"]["said"]["noul"], 0.99)
+        self.assertEqual((record["cost"], record["cost_estimated"]), (None, 0.00024))
+        self.assertEqual(record["profile"], "cloudflare/clef")
+
+    def test_clef_flash_has_its_own_path_and_no_estimate(self):
+        code, _, _, sent, record = self.call(self.envelope("clef-flash"), model="clef-flash")
+        self.assertEqual(code, 0)
+        self.assertTrue(sent[0].endswith("/ai/run/@cf/cloudflare/clef-flash"))
+        self.assertIsNone(record["cost_estimated"])
+
+    def test_auth_failure_names_the_token_and_the_account(self):
+        body = {"result": None, "success": False, "errors": [{"code": 10000, "message": "Authentication error"}],
+                "messages": []}
+        code, out, err, _, record = self.call((401, body))
+        self.assertEqual(code, 1)
+        self.assertIn("Authentication error", err)
+        self.assertIn("CLOUDFLARE_AUTH_TOKEN", err)
+        self.assertIn("CLOUDFLARE_ACCOUNT_ID", err)
+        self.assertEqual((record["failed"], record["invalid"]), ("http_401", 0))  # an error, never invalid_answer
+
+    def test_spent_daily_allocation_is_exhausted(self):
+        body = {"result": None, "success": False, "messages": [],
+                "errors": [{"code": 3036, "message": "You have used up your daily free allocation"}]}
+        code, _, _, sent, record = self.call((429, body))
+        self.assertEqual(code, 1)
+        self.assertEqual(len(sent), 1)  # not retried
+        self.assertEqual(record["failed"], "exhausted")
+
+    def test_rate_limit_is_retried(self):
+        body = {"result": None, "success": False, "messages": [], "errors": [{"code": 3040, "message": "busy"}]}
+        code, _, _, sent, record = self.call((429, body))
+        self.assertEqual(code, 1)
+        self.assertGreater(len(sent), 1)
+        self.assertEqual(record["failed"], "http_429")
+
+    def test_success_false_is_an_error_not_an_answer(self):
+        body = {"result": None, "success": False, "errors": [{"code": 5006, "message": "bad input"}], "messages": []}
+        code, out, err, _, record = self.call(body)
+        self.assertEqual(code, 1)
+        self.assertIn("returned no result", err)
+        self.assertEqual(out, "")
+        self.assertEqual(record["failed"], "http_400")  # a refused request, not a transport failure
+
+    def test_envelope_failure_is_labelled_bad_request_for_items(self):
+        engine = load_engine()
+        with self.assertRaises(engine.jev.CallError) as caught:
+            engine.jev.unwrap_envelope({"success": False, "result": None, "errors": [{"code": 5006}]}, "Cloudflare")
+        self.assertEqual(engine.call_reason(caught.exception), "bad_request")
+
+    def test_estimate_accumulates_across_calls_and_skips_reported_or_null_cost(self):
+        module = load_module()
+        replies = [self.envelope(tokens=1000)["result"], self.envelope(tokens=3000)["result"],
+                   {**self.envelope()["result"], "usage": {"input_tokens": 5000, "cost": 0.5}},
+                   {**self.envelope()["result"], "usage": {"input_tokens": 1000, "cost": None}}]
+        router = module.Router({"steps": [("cloudflare", None)], "host": "other", "host_reason": "t", "route": None},
+                               None, 5)
+        with mock.patch.object(module, "call_jev", side_effect=replies), \
+                mock.patch.dict(os.environ, {"CLOUDFLARE_ACCOUNT_ID": self.ACCOUNT}):
+            for _ in replies:
+                router.send({"model": "clef", "state": "s", "questions": self.QUESTIONS})
+        self.assertAlmostEqual(router.cost_estimated, 5000 * 0.24 / 1e6)  # 1000 + 3000 + 0 (reported) + 1000 (null)
+        self.assertEqual(router.log_fields()["cost_estimated"], 0.0012)
+
+    def test_endpoint_override_fills_model_too(self):
+        url = f"https://api.cloudflare.com/client/v4/accounts/{self.ACCOUNT}/ai/run/@cf/cloudflare/{{model}}"
+        code, _, _, sent, _ = self.call(self.envelope("clef-flash"), model="clef-flash", argv=("--endpoint", url))
+        self.assertEqual(code, 0)
+        self.assertTrue(sent[0].endswith("/@cf/cloudflare/clef-flash"))
+
+    def test_endpoint_override_without_model_warns(self):
+        url = f"https://api.cloudflare.com/client/v4/accounts/{self.ACCOUNT}/ai/run/@cf/cloudflare/clef"
+        code, _, err, sent, _ = self.call(self.envelope("clef-flash"), model="clef-flash", argv=("--endpoint", url))
+        self.assertEqual(code, 0)
+        self.assertEqual(sent[0], url)
+        self.assertIn("--endpoint has no {model}", err)
+
+    def test_user_provider_may_use_the_envelope_shape(self):
+        user = {"name": "Mine", "endpoint": "https://models.example.com/run/{model}", "host": "models.example.com",
+                "auth": {"env": "CLASSIFIER_MINE_KEY"}, "shape": "system-one+envelope", "model": "m-1"}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "profiles.json"
+            path.write_text(json.dumps({"providers": {"user/mine": user}}))
+            result = run("jev_decide.py", "--provider", "user/mine", "--dry-run",
+                         stdin=json.dumps({"state": "s", "questions": self.QUESTIONS}),
+                         env={"CLASSIFIER_PROFILES": str(path)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_unknown_reply_model_gets_the_strict_review(self):
+        code, out, _, _, _ = self.call(self.envelope("other-model"))
+        self.assertEqual(code, 0)
+        module = load_module()
+        self.assertTrue(module.is_strict("other-model", "cloudflare", "clef"))
+        self.assertTrue(module.is_strict("clef", "cloudflare", "clef"))  # uncalibrated until backtested
+
+    def test_bad_account_ids_are_refused_before_any_request(self):
+        for account in ("abc/def", "..", "0123456789abcdef0123456789abcde?", self.ACCOUNT + "\n", ""):
+            code, _, err, sent, _ = self.call(self.envelope(), account=account)
+            self.assertEqual((code, sent), (1, []), account)
+            self.assertIn("CLOUDFLARE_ACCOUNT_ID must be set", err)
+
+    def test_a_model_that_is_not_one_path_segment_is_refused(self):
+        code, _, err, sent, record = self.call(self.envelope(), model="../clef")
+        self.assertEqual((code, sent), (1, []))
+        self.assertEqual(record["failed"], "transport")  # a call error, so a batch keeps its earlier answers
+        self.assertIn("cannot go in this provider's URL", err)
+
+    def test_cloudflare_token_never_selects_cloudflare(self):
+        with mock.patch.dict(os.environ, {"CLOUDFLARE_AUTH_TOKEN": "k", "OPENROUTER_API_KEY": "",
+                                          "TYPESAFE_API_KEY": "", "CLASSIFIER_PROVIDER": ""}):
+            module = load_module()
+            self.assertEqual(module.select_provider(None), "openrouter")
+            self.assertTrue(module.PROVIDERS["cloudflare"]["explicit"])
+
+    def test_model_placeholder_is_reserved(self):
+        bad = {"name": "X", "endpoint": "https://x.example.com/{model}", "host": "x.example.com",
+               "auth": {"env": "CLASSIFIER_X_KEY"}, "shape": "system-one", "model": "m",
+               "params": {"model": {"env": "CLASSIFIER_X_MODEL", "pattern": "[a-z]+"}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "profiles.json"
+            path.write_text(json.dumps({"providers": {"user/x": bad}}))
+            result = run("jev_decide.py", "--contract-version", env={"CLASSIFIER_PROFILES": str(path)})
+            ok = dict(bad)
+            ok.pop("params")
+            path.write_text(json.dumps({"providers": {"user/x": ok}}))
+            good = run("jev_decide.py", "--contract-version", env={"CLASSIFIER_PROFILES": str(path)})
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("is not a param", result.stderr)
+        self.assertEqual(good.returncode, 0, good.stderr)
+
+    def test_price_must_be_a_number_or_null(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "profiles.json"
+            path.write_text(json.dumps({"models": {"user/clef-x": {
+                "provider": "cloudflare", "model": "clef-x", "reply_models": ["clef-x"],
+                "calibration": "uncalibrated", "price": "cheap"}}}))
+            result = run("jev_decide.py", "--contract-version", env={"CLASSIFIER_PROFILES": str(path)})
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("price must be", result.stderr)
 
 
 class Probe(unittest.TestCase):

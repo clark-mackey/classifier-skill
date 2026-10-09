@@ -17,6 +17,7 @@ Use one subagent per provider when the host permits parallel agents and the task
 | Jev on OpenRouter | `--provider openrouter --model typesafe/jev-1.13` |
 | OpenAI Decisions | `--provider openai --model gpt-6-luna` |
 | Local Nimble | `--provider ollama --model nimble:9b --local-only` |
+| Cloudflare Clef | `--provider cloudflare --model clef` (or `--model clef-flash`) |
 
 For a single item, pipe the same JSON request to `scripts/jev_decide.py` with each arm's flags. For several items, give each arm the same JSONL input and question template through `--batch`, using the same shard boundaries across arms. Explicit `--provider` prevents the Codex OpenAI-to-OpenRouter route from substituting Luna on OpenRouter for a direct OpenAI arm. Use credentials only for the matching provider; do not assume OpenAI Decisions is covered by a ChatGPT subscription. A missing credential, quota error, refusal, or invalid answer leaves that arm unanswered. Record it as such instead of replacing it with another model.
 

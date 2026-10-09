@@ -1,6 +1,6 @@
 # Calling the classifier from another skill
 
-Contract version **1.11**. This is the interface other skills may rely on; anything not listed here can change without notice. Tests in `tests/test_scripts.py` (`CallerContract`) pin every guarantee below.
+Contract version **1.12**. This is the interface other skills may rely on; anything not listed here can change without notice. Tests in `tests/test_scripts.py` (`CallerContract`) pin every guarantee below.
 
 ## Find the script
 
@@ -14,7 +14,7 @@ None found: skip your classifier step and say so.
 
 ## Check the version
 
-`python3 <script> --contract-version` prints the version (`1.11`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions add features, or tighten validation or review, with each tightening named in the changelog; a sheet or caller written for an earlier minor version keeps running.
+`python3 <script> --contract-version` prints the version (`1.12`) and exits 0; it reads no input and needs no key. If it fails, or the major version is not the one you were written for, skip your classifier step and say so. Minor versions add features, or tighten validation or review, with each tightening named in the changelog; a sheet or caller written for an earlier minor version keeps running.
 
 ## Call
 
@@ -63,7 +63,7 @@ python3 <classify_items.py> --sheet SHEET.json --items ITEMS.jsonl --out OUT.jso
 | Field | Required | Meaning |
 |---|---|---|
 | `sheet`, `version` | yes | name (lowercase, digits, hyphens) and integer version; a new version for any change to questions, fields, or recipe |
-| `contract` | yes | the contract you wrote for, e.g. `"1.11"`; a different major exits 2 |
+| `contract` | yes | the contract you wrote for, e.g. `"1.12"`; a different major exits 2 |
 | `data` | yes | `cloud_ok`, or `local_only` (then only a server on this machine is used) |
 | `fields` | yes | `{"id": <item field>, "card": [<item fields sent>]}`; only card fields are sent; `id` defaults to `id` |
 | `questions` and/or `recipe` | one of | questions as in SKILL.md, each with an optional `threshold` (0.5–1, default 0.8); `recipe` names a generic set in `recipes/<name>@<N>.json`, and sheet questions override recipe questions by id |
@@ -104,6 +104,7 @@ A calling skill may replace this skill's workflow for its own purpose: the Resha
 
 ## Changelog
 
+- **1.12** (2026-10-09): a `cloudflare` provider for Cloudflare's Clef decision models (`clef`, `clef-flash`), chosen only explicitly. Its replies are unwrapped from Cloudflare's envelope; a reply without `success: true` is a call error, never an answer, and error code 3036 counts as exhausted. Provider endpoints may use `{model}`, filled from each request's model. Model profiles may set `price` (dollars per million input tokens); for replies that report tokens but no cost, the call log, the batch summary, `--probe`, and the items summary add `cost_estimated`, kept apart from `cost`.
 - **1.11** (2026-10-09): `jev_decide.py --probe <model profile id or provider>` sends one tiny request through the normal send path and prints a JSON report: the reply's wrapper, model id and whether its profile knows it, usage fields, cost, answer errors, time, and a suggested profiles patch (model entries only, never a host, endpoint, or credential). `--options` adds up to three option-cap calls (26, 64, 128); a size passes only when every option comes back, and stops the search when the reply drops options or the provider refuses the request (HTTP 400, 413, 422); any other failure leaves the cap unknown. `--dry-run` prints the requests without sending. Exit 0 when the probe answered (with `--options`, when a cap was found), 1 otherwise; a patch is suggested only from answered calls. It writes no profile files; the call log records probes as `mode: probe`. `--probe` with `--provider` exits 2. The report shows the endpoint without its query string or user info.
 - **1.10** (2026-10-09): provider and model settings move to `scripts/profiles.json` with no change to endpoints, keys, automatic choice, the route chain, or limits. `CLASSIFIER_PROFILES` names a user file that may add providers and models under `user/` ids, never change shipped ones, and never send a shipped key to a new host. A sheet `model` may also be a profile id. The call log gains `profile`, `profile_source`, and `profile_hash`. **Tightens review:** the review rule now comes from the profile that was asked for. Only a calibrated profile (Jev) whose known reply ids match the reply gets the normal review; Nimble, any other Ollama model, any `compatible` model, and any model without a profile now get the strict review, and stderr says so for a model without a profile. A Jev reply id not listed in its profile (a future `jev-1.14`) also gets the strict review until the profile is updated.
 - **1.9** (2026-10-08): a response with a missing, blank, or non-string `model` is invalid (exit 3 single, `invalid` line in batch, `invalid_answer` in `classify_items.py`); the requested model is never substituted. Reported usage and cost now count for invalid answers too. `score_labels.py` exits 2 on a duplicate label or prediction id. Tightens, not only adds: a caller that relied on model-less answers passing must handle them as invalid.

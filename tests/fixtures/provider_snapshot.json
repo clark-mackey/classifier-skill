@@ -1,5 +1,33 @@
 {
  "limits": {
+  "cloudflare|clef": {
+   "options": 128,
+   "questions": 64,
+   "state_ascii_chars": 127935,
+   "template_without_state_options": 128,
+   "text_refused": {
+    "choice": null,
+    "choice_null": null,
+    "instructions": null,
+    "noul": null,
+    "noul_null": null,
+    "score": null
+   }
+  },
+  "cloudflare|clef-flash": {
+   "options": 128,
+   "questions": 64,
+   "state_ascii_chars": 127935,
+   "template_without_state_options": 128,
+   "text_refused": {
+    "choice": null,
+    "choice_null": null,
+    "instructions": null,
+    "noul": null,
+    "noul_null": null,
+    "score": null
+   }
+  },
   "compatible|Winnow-12B": {
    "options": 300,
    "questions": 200,
@@ -114,6 +142,37 @@
   }
  },
  "providers": {
+  "cloudflare": {
+   "accepts": {
+    "http://127.0.0.1:11434/v1/systemone": false,
+    "http://localhost:8080/v1/systemone": false,
+    "http://openrouter.ai/x": false,
+    "https://api.openai.com/v1/decisions": false,
+    "https://api.typesafe.ai/v1/systemone": false,
+    "https://evil.example.com/v1/systemone": false,
+    "https://localhost:9/x": false,
+    "https://models.example.com/v1/systemone": false,
+    "https://openrouter.ai/api/alpha/decisions": false
+   },
+   "endpoint": "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/cloudflare/{model}",
+   "endpoint_with_env": "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/ai/run/@cf/cloudflare/{model}",
+   "endpoint_without_env": "exit 1",
+   "explicit": true,
+   "fields": [
+    "model",
+    "questions",
+    "state"
+   ],
+   "host": "api.cloudflare.com",
+   "key": "CLOUDFLARE_AUTH_TOKEN",
+   "key_optional": null,
+   "loopback_only": null,
+   "model": "clef",
+   "model_env": null,
+   "name": "Cloudflare Workers AI",
+   "shape": "system-one+envelope",
+   "url_env": null
+  },
   "compatible": {
    "accepts": {
     "http://127.0.0.1:11434/v1/systemone": false,

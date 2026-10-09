@@ -1,6 +1,6 @@
 # Plan: model profiles, then Cloudflare Clef
 
-Date: 2026-10-09. Status: Phase 1 shipped (contract 1.10, 6d04f5d); Phase 2 built (contract 1.11, uncommitted); Phases 3–4 planned. Clef is now contract 1.12. Revised after code-owl plan reviews rounds 1–3 (2026-10-09).
+Date: 2026-10-09. Status: Phase 1 shipped (contract 1.10, 6d04f5d); Phase 2 shipped (contract 1.11, dc67ac9 and 6547f8f); Phase 3 shipped (contract 1.12, code-reviewed and re-reviewed); Phase 4 planned. Revised after code-owl plan reviews rounds 1–3 (2026-10-09).
 
 ## Goal
 
@@ -230,6 +230,15 @@ Each profile is one model. Example:
 
 ### Phase 3. Cloudflare Clef (contract 1.12)
 
+**Live check results (2026-10-09, temporary `user/` profiles, account token).**
+- **Models on the account:** `@cf/cloudflare/clef`, `@cf/cloudflare/clef-flash`, and `@cf/cloudflare/clef-omni` (new, not in the blog; probably the image model, unprobed). Each model has its own URL path (`.../ai/run/@cf/cloudflare/<model>`), so the path's model segment must follow the profile, not the provider.
+- **Success envelope:** `{"result": {...}, "success": true, "errors": [], "messages": []}`. `result` is exactly the System One body: `model` (bare `clef` / `clef-flash`), `answers` keyed by question id, `usage`.
+- **Usage:** `{"input_tokens", "output_tokens": 0}` with no cost, so `cost_estimated` = input_tokens × $0.24/M.
+- **Score answers carry an extra `legend` field** (`{"0": label, ...}`); check that the response validation tolerates it.
+- **Bad-auth envelope:** HTTP 401 `{"result": null, "success": false, "errors": [{"code": 10000, "message": "Authentication error"}], "messages": []}`. A wrong account id gives the same 401 code 10000, so the error text should suggest checking the account id as well as the token.
+- **Latency:** clef ~0.7s, clef-flash ~0.26s end to end. A 3-question probe used 289 input tokens.
+- **Still unknown:** the option cap (`--probe --options` needs the envelope adapter first), rate-limit bodies, and `clef-omni`.
+
 1. **Live check, which gates the adapter design.**
    - Make one call per Clef model through `--probe`, using the owner's token from Keychain.
    - Record one success body, one bad-token body, and one rate-limit or allowance body if one can be triggered cheaply. Otherwise use Cloudflare's documented error codes.
@@ -265,6 +274,25 @@ Each profile is one model. Example:
    - An account ID containing `/`, `..`, `?`, or a trailing newline is refused before any request.
    - `cost_estimated` is null for `clef-flash`.
    - One live call per model succeeds.
+
+**Phase 3 build notes (2026-10-09).** Built as planned, with these deviations:
+- **One provider, per-model URL.** Each Clef model has its own path, so provider endpoints may use a reserved `{model}` placeholder, filled from the request's model in `call_jev` (one `[A-Za-z0-9_-]` segment, else exit 1 before sending). It cannot be declared as a param.
+- **Shape name** `system-one+envelope`. `unwrap_envelope` returns `result` only when `success` is true; anything else raises `CallError` ("returned no result"), so it is never `invalid_answer`.
+- **Error mapping.** 401/403 keep the existing HTTP path; for a provider with URL params the message adds "check CLOUDFLARE_AUTH_TOKEN ... and CLOUDFLARE_ACCOUNT_ID". 429 with error code 3036 (daily free allocation) is `Exhausted`; other 429s retry. Code 3036 is from Cloudflare's docs, not seen live.
+- **Cost.** Model profiles take `price` (dollars per million input tokens, or null). `Router` keeps `cost_estimated`, added to `log_fields`, so every call log record carries it; also in the batch stderr line, the `--probe` report and the items summary.
+- **Limits.** Provider: 64 questions, `request_tokens` and `state_question_tokens` 52,000 (65,536 less 20%). Models: `options: 128` from live `--probe --options` (both passed 26/64/128; 128 is the probe's ceiling, not a known cap).
+- **Not built:** images and `clef-omni`.
+- **Live acceptance:** both models probed through the shipped profiles; one call through `model-worker jev` with `CLASSIFIER_PROVIDER=cloudflare`. model-worker (outside the repo, untracked) now supplies the two Cloudflare Keychain items.
+- **Tests:** 12 in `Cloudflare` (mocked replies). The golden snapshot gained the `cloudflare` provider and two limits entries; nothing existing changed (additions only).
+
+**Phase 3 code review notes (2026-10-09, code-owl, Claude subagent).** Fixed:
+- An envelope failure (`success` not true) is a `CallError` with status 400, so the call log says `http_400` and `classify_items` says `bad_request` instead of `transport`. It still stops an items run, as any bad request does.
+- An unusable `{model}` value raises `CallError`, not a bare exit, so a batch keeps the answers it already has.
+- `model-worker` reads the Cloudflare Keychain items only when `CLASSIFIER_PROVIDER=cloudflare`.
+- A reply with `"cost": null` gets an estimate. The batch line shows reported and estimated cost together. `is_exhausted` has explicit parentheses.
+- Tests added for: the http_400 and bad_request labels, the estimate across several calls (with reported and null cost), an `--endpoint` override with `{model}`, a user provider with the envelope shape, and Clef's `legend` field.
+- Not changed: `log_fields` carries `cost_estimated: null` for every provider (additive).
+- Re-review: all fixed. Added a stderr warning when `--endpoint` drops the provider's `{model}`, since every request then goes to that URL whatever `--model` says.
 
 ### Phase 4. Backtest
 
