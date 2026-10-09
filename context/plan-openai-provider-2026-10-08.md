@@ -1,6 +1,6 @@
 # Plan: direct OpenAI Decisions provider; no OpenRouter inside Codex
 
-Date: 2026-10-08. Status: partly built (contract 1.8, uncommitted).
+Date: 2026-10-08. Status: partly built (contract 1.8). ChatGPT-plan route deferred pending explicit Decisions support.
 
 Built 2026-10-08: `openai` provider with translation both ways and the refusal state (Phase 1 steps 1, 2, 5, 6); host detection and the route chain `apikey` then `openrouter` (Luna), moving only on exhausted credit, with `CLASSIFIER_ROUTE` and `CLASSIFIER_HOST` (Phase 2, without the ChatGPT step); stricter review for uncalibrated Luna (Phase 4 step 1, as a family rule, not a table); call-log and summary fields; tests; docs. Live check: Codex route with only an OpenRouter key answered through Luna on OpenRouter.
 
@@ -10,20 +10,20 @@ Built 2026-10-08 (outside the repo): `~/.codex/bin/model-worker jev` now runs `j
 
 ## Goal
 
-People running this skill in Codex on OpenAI (including the owner) get OpenAI's Decisions API directly, not OpenRouter, by default. Where the person has a ChatGPT account, the ChatGPT-plan route is preferred over an API key (owner decision 2026-10-08; the owner signs in to Codex with a ChatGPT account). When the person chooses to, or when plan usage runs out, the run moves down a fixed chain: ChatGPT sign-in, then an OpenAI API key if one exists, then OpenRouter if a key exists (owner decision 2026-10-08). Everyone else is unchanged. Luna is also reachable outside Codex through OpenRouter's existing endpoint.
+People running this skill in Codex on OpenAI (including the owner) get OpenAI's Decisions API directly by default when they have an API key. The current chain is OpenAI API key, then OpenRouter on exhausted API credit. The owner prefers ChatGPT-plan usage, but adding it requires OpenAI to explicitly document subscription use for `/v1/decisions`; until then, direct Decisions calls use separate API billing. Everyone else is unchanged. Luna is also reachable outside Codex through OpenRouter's existing endpoint.
 
 ## Facts this plan rests on
 
 - OpenAI Decisions API: public beta, `POST https://api.openai.com/v1/decisions`, only model `gpt-6-luna`, $0.10/M input, no output charge, ZDR/HIPAA for eligible accounts. Shape differs from Jev: `input` vs `state`, questions array with `name`, `predicate` (answer `probability`) vs `noul`, `choices[{value,description}]`, `levels[{label,description}]`, answers array, probabilities as lists, extra `refusal` answer type. Undocumented: limits, error body, refusal schema, `confidence` definition, rate-limit headers, dated snapshots.
 - OpenRouter serves `openai/gpt-6-luna-decisions-20261006` on its existing `/api/alpha/decisions` in Jev shape. Probe 2026-10-08 passed `answer_errors` for noul, choice, score; 165 tokens cost $0.0000165.
 - Codex's own ChatGPT login is not a supported route for other tools. Codex docs: "For general OpenAI API calls, continue to use Platform API keys"; `auth.json` holds access tokens to be treated like a password. Community reports say Codex rotates the refresh token on use, so a second reader can break the user's Codex session. The skill never reads or copies Codex credentials.
-- The supported ChatGPT-plan route is OpenAI's "Sign in with ChatGPT" for apps: a localhost PKCE OAuth flow with dynamic client registration (`client_id=dynamic_agent_client`), no client secret or API key, permission `chatgpt.tokens.use.direct` on `https://api.openai.com/v1`, refresh token via `offline_access`, usage billed to the user's ChatGPT plan allowance or credits. Eligible: Plus and Pro users. Open-source projects and personal projects that run locally are eligible at launch (this repo is public). Confirmed for the Responses API; not confirmed for Decisions. The reference implementation is a JS DevKit; no Python client or device-code flow documented.
+- OpenAI's [Sign in with ChatGPT plan-usage docs](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference) support eligible Responses API requests. They do not document `/v1/decisions` as eligible. The [Decisions guide](https://developers.openai.com/api/docs/guides/decisions) documents an API key and usage pricing. Token acceptance alone would not prove that Decisions usage is included in a ChatGPT plan. OpenAI has not announced whether that endpoint will become eligible.
 - Codex: default `shell_environment_policy` reportedly strips subprocess env vars whose names contain KEY, SECRET, or TOKEN (third-party source, unverified). `CODEX_THREAD_ID` is injected "when applicable" (unverified per surface). Default sandbox may block network.
 
 ## Phase 0: evidence before design (no code)
 
 1. One live Codex run of the current skill (CLI, Desktop, `codex exec`, and a `model-worker claude` child launched from Codex). Record, without printing values: which of `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `CODEX_THREAD_ID`, `CODEX_HOME` arrive; whether network works in the sandbox; how current Codex Jev calls get their key today. Design step 3 and step 4 from this evidence.
-2. ChatGPT route spike (the gate for Phase 3A): time-boxed, throwaway, in the session scratchpad, never the repo. Run the DevKit sample (or a minimal sign-in script) only to get one token with the owner's own ChatGPT sign-in, then make one tiny `POST /v1/decisions` call. Nothing from the spike ships. Record:
+2. ChatGPT route gate: first require official OpenAI documentation that `/v1/decisions` is eligible for ChatGPT-plan usage. Until then, do not implement Phase 3A or probe token acceptance as a substitute for billing evidence. If OpenAI documents support, run a time-boxed, throwaway spike in the session scratchpad, never the repo. Get one token with the owner's own ChatGPT sign-in, then make one tiny `POST /v1/decisions` call. Nothing from the spike ships. Record:
    - accepted or rejected;
    - plan usage per 100 and per 1,000 items (ChatGPT Settings, Usage), and whether it draws from the same allowance as Codex;
    - rate-limit headers; token lifetime and refresh behavior.
@@ -50,18 +50,18 @@ People running this skill in Codex on OpenAI (including the owner) get OpenAI's 
 
 1. Order: `--provider` or `CLASSIFIER_PROVIDER` always wins. Else host detection. Else today's order (OpenRouter, TypeSafe), plus `openai` when it is the only key set.
 2. Host detection: use the signal Phase 0 proves reliable. A non-secret config setting (for example `CLASSIFIER_HOST=codex|other`, or a key in a small config file) overrides detection; children launched from Codex must not inherit Codex routing unless that setting says so. Every call-log entry records detected host and the reason for the provider choice.
-3. The route chain for OpenAI work, the same wherever it runs: (1) `chatgpt`, the skill's own ChatGPT sign-in; (2) `apikey`, OpenAI direct with an API key; (3) `openrouter`, Luna through OpenRouter (`openai/gpt-6-luna-decisions-20261006`, Jev request shape), so all three steps answer with the same model family and thresholds and caches stay valid. A step whose credential is absent is skipped. Host detection decides only whether this chain is used automatically (in Codex) or only when chosen (elsewhere).
-4. Starting point: `CLASSIFIER_ROUTE=chatgpt|apikey|openrouter` (or a matching flag) lets the person start lower in the chain whenever they want. Default `chatgpt`.
-5. Moving down the chain, automatically, only on exhaustion: ChatGPT plan usage used up moves to `apikey`; API-key quota or billing exhausted (`insufficient_quota`) moves to `openrouter`. Ordinary errors, rate limits (429 with retry), and outages retry or fail on the current step; they never move down. Each move is logged with the reason and printed once in the run summary.
-6. Missing or broken ChatGPT sign-in (never signed in, 401 after one refresh, ineligible plan) is not exhaustion: stop with the fix message ("run `openai_auth.py login`", or the ineligible-plan message), unless the person set `CLASSIFIER_ROUTE` lower. Assumption to confirm with the owner; it keeps a fixable sign-in problem from silently moving work to another service.
+3. The supported route chain for OpenAI work is (1) `apikey`, OpenAI direct with an API key; (2) `openrouter`, Luna through OpenRouter (`openai/gpt-6-luna-decisions-20261006`, Jev request shape). A step whose credential is absent is skipped. Host detection decides only whether this chain is used automatically (in Codex) or only when chosen (elsewhere). Add `chatgpt` ahead of `apikey` only if the Phase 0 documentation gate passes.
+4. Starting point: `CLASSIFIER_ROUTE=apikey|openrouter` lets the person start lower in the chain. Default `apikey`; reserve `chatgpt` for a documented and implemented plan route.
+5. Moving down the chain, automatically, only on exhaustion: API-key quota or billing exhausted (`insufficient_quota`) moves to `openrouter`. Ordinary errors, rate limits (429 with retry), and outages retry or fail on the current step; they never move down. Each move is logged with the reason and printed once in the run summary. ChatGPT-plan exhaustion handling applies only if that route becomes supported.
+6. If ChatGPT-plan usage for Decisions becomes supported, define missing or broken sign-in behavior before enabling it. A missing sign-in, failed refresh, or ineligible plan is not exhaustion.
 7. If no step in the chain has a credential: stop with a message naming each option; callers record `skipped`. A local model only when asked for. The call log records route, model, and credential type per call, never the credential.
-8. Outside Codex the ChatGPT sign-in is used only when `openai` is chosen explicitly (`--provider openai` or `CLASSIFIER_PROVIDER=openai`), so signing in does not silently move Claude Code callers off Jev.
+8. If ChatGPT-plan usage for Decisions becomes supported, keep it opt-in outside Codex so signing in does not silently move Claude Code callers off Jev.
 9. Rollout order: Phase 1 and docs ship first; the Codex rule turns on only after the caller list from Phase 0 is checked and the stop message is in place.
 10. Phase 0 step 1 must show whether `OPENROUTER_API_KEY` reaches the skill inside Codex; if Codex strips it, the `openrouter` step uses the same delivery as 3B (Codex-native allowance, else an auth command without KEY in its name).
 
 ## Phase 3: credentials inside Codex
 
-### 3A. ChatGPT sign-in (preferred; only if the Phase 0 spike passes)
+### 3A. ChatGPT sign-in (deferred; only if OpenAI documents Decisions plan usage and the Phase 0 spike passes)
 
 1. Own module `scripts/openai_auth.py` with a small interface: `bearer()`, `login()`, `logout()`, `status()`. `jev_decide.py` only calls `bearer()`. Run as `python3 scripts/openai_auth.py login|logout|status`.
 2. Protocol: built only from a published spec found in Phase 0. If only the JS DevKit exists, call it through Node as a declared dependency, or drop 3A; never hand-port it. Flow: run once by the person outside the sandbox; localhost callback on `127.0.0.1`, PKCE, state and nonce checks, ID-token verification (signature, issuer, audience, nonce). The per-install host ID is stored beside the tokens.
@@ -102,11 +102,10 @@ People running this skill in Codex on OpenAI (including the owner) get OpenAI's 
 - Sign-in: state, nonce, and PKCE mismatch rejected; ID token with bad signature, wrong issuer, or wrong audience rejected; token store written with owner-only permissions; tokens never appear in logs or error messages.
 - Refresh: parallel shards and two separate processes produce exactly one refresh and all end with the new token; a holder that crashes mid-refresh leaves a stale lock that the next process detects and recovers.
 - Credential order (inside and outside Codex): sign-in beats API key; expired sign-in with a working refresh refreshes; failed refresh stops with the login message, never falls to OpenRouter.
-- Route chain: plan exhaustion moves to `apikey`; `insufficient_quota` moves to `openrouter`; absent credentials skip a step; 429, outages, and other errors never move down; each move logged and shown in the summary.
-- `CLASSIFIER_ROUTE` starts the chain at each step; missing or broken sign-in stops with the fix message unless the route starts lower.
+- Route chain: `insufficient_quota` moves from `apikey` to `openrouter`; absent credentials skip a step; 429, outages, and other errors never move down; each move logged and shown in the summary. Test plan exhaustion only if Phase 3A becomes supported.
+- `CLASSIFIER_ROUTE` starts at `apikey` or `openrouter`; test sign-in behavior only if Phase 3A becomes supported.
 - A run that moves mid-way keeps one model family; answers record their route.
-- Ineligible plan gets its own message.
-- Plan budget: estimate above the warn limit warns; above the hard cap stops before sending.
+- If Phase 3A becomes supported, an ineligible plan gets its own message and plan-budget caps are tested.
 - Shard parallelism follows the credential's cap; 429 backs off with jitter.
 
 ## Phase 6: release and outside-repo follow-ups
@@ -117,14 +116,13 @@ People running this skill in Codex on OpenAI (including the owner) get OpenAI's 
 
 ## Decisions recorded
 
-- 2026-10-08: owner's Codex signs in with a ChatGPT account. ChatGPT-plan route preferred wherever a person has an eligible ChatGPT plan (eligible plans confirmed in Phase 0); API key is the fallback.
-- The skill never reuses Codex's login; it has its own sign-in.
-- 2026-10-08: when the person chooses to, or plan usage runs out, move to an OpenAI API key if one exists, then to OpenRouter if a key exists. OpenRouter in Codex is allowed only as this fallback.
+- 2026-10-08: owner prefers ChatGPT-plan usage, contingent on OpenAI explicitly documenting `/v1/decisions` eligibility. The skill never reuses Codex's login.
+- 2026-10-08: current route uses an OpenAI API key, then OpenRouter when API credit is exhausted. A supported ChatGPT-plan route would precede the API key.
 
 ## Open for the owner
 
-- Phase 2 step 6: a missing or broken ChatGPT sign-in stops with the fix message rather than moving down the chain (proposed). Confirm or change.
+- If Phase 3A becomes supported, decide whether a missing or broken ChatGPT sign-in stops with a fix message or moves to the API-key route.
 
 ## Open risk
 
-The whole ChatGPT route depends on Decisions accepting "Sign in with ChatGPT" tokens, which OpenAI has not documented. Phase 0 step 2 decides it. If it fails: the owner either creates an API key (pay as you go) or keeps using Jev through OpenRouter by explicit choice. Second dependency: a published sign-in protocol or a usable DevKit license; without one, 3A is dropped.
+OpenAI documents ChatGPT-plan use for eligible Responses API requests, not Decisions. Keep Phase 3A deferred until OpenAI explicitly documents `/v1/decisions` eligibility; a successful bearer-token request alone is insufficient. Direct Decisions calls require separate API billing in the meantime.

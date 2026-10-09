@@ -18,6 +18,8 @@ The script sends one request shape and validates one answer shape, whoever answe
 
 OpenAI's Decisions API (public beta) answers with GPT-6 Luna. Its request and answer shapes differ from System One's, so the script translates both ways: `state` becomes `input` (an object or array is sent as JSON text), question ids become `name`s, `noul` becomes `predicate` (its `true`/`false` descriptions are added to the instructions), and choice options and score levels become `choices` and `levels`. Answers are translated back and checked like any other; a score level whose label is not the level asked at that position, or an option or level listed twice, makes the answer invalid. Structured instructions or descriptions are refused before sending, because Decisions takes only text. A `refusal` answer comes back as `{"type": "refusal"}` and is always flagged for a person.
 
+Direct Decisions calls use API billing, separate from a ChatGPT subscription. OpenAI's [Decisions guide](https://developers.openai.com/api/docs/guides/decisions) documents an API key and usage pricing. [Sign in with ChatGPT plan usage](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference) currently documents eligible Responses API requests, not `/v1/decisions`.
+
 **Route chain.** Inside Codex, or whenever `CLASSIFIER_ROUTE` is set, the script uses this chain instead of picking one provider:
 
 1. `apikey`: OpenAI Decisions with `OPENAI_API_KEY`.
@@ -25,7 +27,7 @@ OpenAI's Decisions API (public beta) answers with GPT-6 Luna. Its request and an
 
 A step without its key is skipped. The run moves down only when a step's credit runs out (OpenAI `insufficient_quota`, OpenRouter HTTP 402); rate limits, outages, and other errors retry or fail where they are. Each move is printed and recorded in the call log and the `classify_items.py` summary (`route_moves`). Every step answers with Luna, so thresholds and comparisons hold across a move; a `classify_items.py` line is stamped with the model that answered it. `CLASSIFIER_ROUTE=openrouter` starts lower. An explicit `--provider` or `CLASSIFIER_PROVIDER` always wins and uses that provider alone, so `--provider openrouter` inside Codex still means Jev. `--model` and `--endpoint` need `--provider` when the chain is in use, and `classify_items.py` ignores a sheet's `model` pin on the chain (with a warning). `--dry-run` needs no key on the chain.
 
-A ChatGPT sign-in step, using the person's ChatGPT plan before any API key, is planned but not built; it waits on a test that OpenAI's Decisions API accepts "Sign in with ChatGPT" tokens (`context/plan-openai-provider-2026-10-08.md`). The script never reads or reuses Codex's own login (`~/.codex/auth.json`).
+A ChatGPT sign-in step for Decisions is deferred unless OpenAI explicitly documents plan usage for `/v1/decisions`; token acceptance alone would not establish subscription billing or supported use. See `context/plan-openai-provider-2026-10-08.md`. The script never reads or reuses Codex's own login (`~/.codex/auth.json`).
 
 **Codex.** The script treats a run as inside Codex when `CLASSIFIER_HOST=codex`, or when `CODEX_THREAD_ID` is set and `CLAUDECODE` is not (a Claude worker launched from Codex keeps the normal choice). `CLASSIFIER_HOST=other` turns the Codex route off. Two Codex defaults get in the way:
 

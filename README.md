@@ -75,6 +75,8 @@ Optional: `hooks/nudge_classifier.py` is a Claude Code `PreToolUse` hook that ad
 
 The OpenRouter Decisions endpoint is alpha; TypeSafe's System One API is the direct route with the same request shape. Returned probabilities describe the classifier's preference among the supplied options. They are not success rates. Data you say must stay on your machine is never sent.
 
+Direct OpenAI Decisions calls require separately billed API access. ChatGPT-plan sign-in is documented for eligible Responses API requests, not `/v1/decisions`; see [provider details](references/providers.md).
+
 ## Calling it from another skill
 
 For a list judged the same way every time, write a question sheet (data only: questions or a generic recipe from `recipes/`, the item fields to send, thresholds, the data rule) and run `scripts/classify_items.py`: items in, one stamped line per item out, plus a summary file. `scripts/score_labels.py` scores the answers against labels you hold back, choosing a threshold on one split and reporting it on another. How to wire it into a pipeline, and what the backtests taught, is in [docs/calling-from-a-pipeline.md](docs/calling-from-a-pipeline.md).
