@@ -1,6 +1,6 @@
 # Plan: model profiles, then Cloudflare Clef
 
-Date: 2026-10-09. Status: Phase 1 shipped (contract 1.10, 6d04f5d); Phase 2 shipped (contract 1.11, dc67ac9 and 6547f8f); Phase 3 shipped (contract 1.12, code-reviewed and re-reviewed); Phase 4 planned. Revised after code-owl plan reviews rounds 1–3 (2026-10-09).
+Date: 2026-10-09. Status: Phase 1 shipped (contract 1.10, 6d04f5d); Phase 2 shipped (contract 1.11, dc67ac9 and 6547f8f); Phase 3 shipped (contract 1.12, code-reviewed and re-reviewed); Phase 4 done (backtest-clef-2026-10-09.md: Clef stays uncalibrated). Revised after code-owl plan reviews rounds 1–3 (2026-10-09).
 
 ## Goal
 
@@ -299,6 +299,8 @@ Each profile is one model. Example:
 1. Run Clef, Clef-flash and Jev on the same existing labeled set, with identical shards, following parallel-comparison.md. The sheet's data rule must allow cloud.
 2. Score each with `score_labels.py`. Choose the threshold on one split and report it on the other.
 3. Keep Clef `uncalibrated` unless the held-out results justify its own thresholds. Record the results in `context/`.
+
+**Phase 4 result (2026-10-09).** Run on the 48 search terms and 60 support tickets in `evals/files/`. Clef was right on every item it was confident about, but its confidence runs low on many-option questions (12 of 48 search terms auto-answered at 0.7, against Jev's 40), it cost 3–4× Jev by estimate, and the sets are too small for its own thresholds. Clef and Clef-flash stay `uncalibrated`; Jev stays the default. Details: [backtest-clef-2026-10-09.md](backtest-clef-2026-10-09.md).
 
 ### Later, separate plans
 

@@ -64,7 +64,7 @@ Cloudflare's Clef decision models run on Workers AI: `clef` (larger, about 0.5 t
 - **Limits.** 1 to 64 questions and a 65,536-token context, held to 52,000 tokens because Cloudflare silently truncates long state. Both models answered 128-option questions on 2026-10-09; that is the largest size `--probe` tries, not a known cap.
 - **Cost.** Replies report input tokens but no cost. The skill estimates cost from the profile's price (`clef`: $0.24 per million input tokens) and logs it as `cost_estimated`, apart from reported `cost` (a reply whose `cost` is null counts as unreported). `clef-flash` has no published price, so it has no estimate.
 - **Not supported yet:** images, and `clef-omni`, which the account lists but this skill has not probed.
-- **Review.** Both are `uncalibrated` until a backtest, so their answers get the strict review.
+- **Review.** Both are `uncalibrated`, so their answers get the strict review. A first backtest (2026-10-09, 108 labeled items) found them accurate where confident but with low confidence on many-option questions; Clef's estimated cost was 3–4× Jev's (Clef-flash has no published price). Too few items to set their own thresholds.
 
 ## Ollama System One
 
